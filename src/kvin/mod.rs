@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-/// 🔑 Represents possible key types.
+/// Represents possible key types.
 /// Must implement Eq + Hash for use in HashMap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Key {
@@ -20,7 +20,7 @@ impl Hash for Key {
     }
 }
 
-/// 💾 Represents possible value types.
+/// Represents possible value types.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(i64),
@@ -29,7 +29,7 @@ pub enum Value {
     Blob(Vec<u8>),
 }
 
-/// 🧠 Trait that defines the Kvin API.
+/// Trait that defines the Kvin API.
 pub trait KvStore {
     /// Insert a key-value pair.
     fn put(&mut self, key: Key, value: Value) -> bool;
@@ -41,7 +41,7 @@ pub trait KvStore {
     fn update(&mut self, key: &Key, new_value: Value) -> bool;
 }
 
-/// 🧱 The actual store implementation.
+/// The actual store implementation.
 #[derive(Debug, Default)]
 pub struct Kvin {
     data: HashMap<Key, Value>,
@@ -84,7 +84,7 @@ impl KvStore for Kvin {
     }
 }
 
-// 🧩 Optional helper conversions for ergonomics
+/// Optional helper conversions for ergonomics
 impl From<&str> for Key {
     fn from(s: &str) -> Self {
         Key::Text(s.to_string())
