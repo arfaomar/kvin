@@ -1,23 +1,13 @@
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::hash::{Hash};
 
 /// Represents possible key types.
 /// Must implement Eq + Hash for use in HashMap.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Key {
     Int(i64),
     Text(String),
     Bool(bool),
-}
-
-impl Hash for Key {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            Key::Int(i) => i.hash(state),
-            Key::Text(s) => s.hash(state),
-            Key::Bool(b) => b.hash(state),
-        }
-    }
 }
 
 /// Represents possible value types.
