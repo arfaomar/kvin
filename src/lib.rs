@@ -1,2 +1,2 @@
 pub mod kvin;
-pub use kvin::{Kvin, Key, Value, KvStore};
+pub use kvin::{Key, KvStore, Kvin, Value};

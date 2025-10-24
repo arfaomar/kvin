@@ -1,13 +1,24 @@
-use kvin::{Kvin, Key, Value, KvStore};
+use kvin::{Key, KvStore, Kvin, Value};
 
 fn main() {
     let mut store = Kvin::new();
 
-    store.put(Key::from("name"), Value::from("Kvin"));
-    store.put(Key::from(1), Value::from(404));
-    store.put(Key::from(true), Value::from("mem safe"));
+    println!(
+        "put name: {}",
+        store.put(Key::from("name"), Value::from("Kvin"))
+    );
+    println!("put int: {}", store.put(Key::from(1), Value::from(404)));
+    println!(
+        "put bool: {}",
+        store.put(Key::from(true), Value::from("mem safe"))
+    );
 
-    println!("name -> {:?}", store.get(&Key::from("name")));
+    println!(
+        "put name again: {}",
+        store.put(Key::from("name"), Value::from("Kvin v3"))
+    );
+    println!("name after failed put: {:?}", store.get(&Key::from("name")));
+
     println!("int key -> {:?}", store.get(&Key::from(1)));
 
     store.update(&Key::from("name"), Value::from("Kvin v2"));

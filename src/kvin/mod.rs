@@ -31,8 +31,8 @@ pub enum Value {
 
 /// 🧠 Trait that defines the Kvin API.
 pub trait KvStore {
-    /// Insert or overwrite a key-value pair.
-    fn put(&mut self, key: Key, value: Value);
+    /// Insert a key-value pair.
+    fn put(&mut self, key: Key, value: Value) -> bool;
     /// Retrieve a value by key.
     fn get(&self, key: &Key) -> Option<&Value>;
     /// Delete a key and return its value if it existed.
@@ -57,8 +57,13 @@ impl Kvin {
 }
 
 impl KvStore for Kvin {
-    fn put(&mut self, key: Key, value: Value) {
-        self.data.insert(key, value);
+    fn put(&mut self, key: Key, value: Value) -> bool {
+        if self.data.contains_key(&key) {
+            false
+        } else {
+            self.data.insert(key, value);
+            true
+        }
     }
 
     fn get(&self, key: &Key) -> Option<&Value> {

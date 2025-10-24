@@ -1,13 +1,15 @@
 #[cfg(test)]
 mod tests {
-    use kvin::{Kvin, Key, Value, KvStore};
+    use kvin::{Key, KvStore, Kvin, Value};
 
-#[test]
+    #[test]
     fn test_put_and_get() {
         let mut store = Kvin::new();
-        store.put(Key::from("language"), Value::from("Rust"));
-        store.put(Key::from(1), Value::from(true));
+        assert!(store.put(Key::from("language"), Value::from("Rust")));
+        assert!(store.put(Key::from(1), Value::from(true)));
 
+        // Versuch, existierenden Schlüssel zu überschreiben
+        assert!(!store.put(Key::from("language"), Value::from("Go")));
         assert_eq!(
             store.get(&Key::from("language")),
             Some(&Value::Text("Rust".into()))
@@ -18,7 +20,7 @@ mod tests {
     #[test]
     fn test_update_existing() {
         let mut store = Kvin::new();
-        store.put(Key::from(42), Value::from("life"));
+        assert!(store.put(Key::from(42), Value::from("life")));
         assert!(store.update(&Key::from(42), Value::from("universe")));
         assert_eq!(
             store.get(&Key::from(42)),
@@ -35,7 +37,7 @@ mod tests {
     #[test]
     fn test_delete() {
         let mut store = Kvin::new();
-        store.put(Key::from("remove"), Value::from(123));
+        assert!(store.put(Key::from("remove"), Value::from(123)));
         assert_eq!(store.delete(&Key::from("remove")), Some(Value::Int(123)));
         assert_eq!(store.get(&Key::from("remove")), None);
     }
