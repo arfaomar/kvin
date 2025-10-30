@@ -11,14 +11,21 @@ mod tests {
         // Attempt to overwrite existing key should fail
         assert!(!store.put(Key::from("language"), Value::from("Go")));
 
-        // Use get_owned() because get() panics in Lab 3
+        // 🔹 Check get() (returns owned Value)
+        assert_eq!(
+            store.get(&Key::from("language")),
+            Some(Value::Text("Rust".into()))
+        );
+        assert_eq!(store.get(&Key::from(1)), Some(Value::Bool(true)));
+
+        // 🔹 Check get_owned() explicitly (same behavior)
         assert_eq!(
             store.get_owned(&Key::from("language")),
             Some(Value::Text("Rust".into()))
         );
         assert_eq!(store.get_owned(&Key::from(1)), Some(Value::Bool(true)));
 
-        // Borrowed variant should return same data zero-copy
+        // 🔹 Check borrowed version (zero-copy access)
         assert_eq!(
             store.get_borrowed(&Key::from("language")),
             Some(BorrowedValue::Text("Rust"))
@@ -30,6 +37,12 @@ mod tests {
         let mut store = Kvin::new();
         assert!(store.put(Key::from(42), Value::from("life")));
         assert!(store.update(&Key::from(42), Value::from("universe")));
+
+        // Both get() and get_owned() must see the new value
+        assert_eq!(
+            store.get(&Key::from(42)),
+            Some(Value::Text("universe".into()))
+        );
         assert_eq!(
             store.get_owned(&Key::from(42)),
             Some(Value::Text("universe".into()))
@@ -46,11 +59,14 @@ mod tests {
     fn test_delete() {
         let mut store = Kvin::new();
         assert!(store.put(Key::from("remove"), Value::from(123)));
+
         assert_eq!(store.delete(&Key::from("remove")), Some(Value::Int(123)));
+
+        // Should now be gone in both get() and get_owned()
+        assert_eq!(store.get(&Key::from("remove")), None);
         assert_eq!(store.get_owned(&Key::from("remove")), None);
     }
 
-    
     #[test]
     fn test_roundtrip_serialization() {
         use kvin::{deserialize_borrowed, serialize_value};
