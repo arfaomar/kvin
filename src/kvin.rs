@@ -77,7 +77,7 @@ pub trait KvStore {
     /// Insert a key-value pair.
     fn put(&mut self, key: Key, value: Value) -> bool;
     /// Retrieve a value by key.
-    fn get(&self, key: &Key) -> Option<&Value>;
+    fn get(&self, key: &Key) -> Option<Value>;
     /// Delete a key and return its value if it existed.
     fn delete(&mut self, key: &Key) -> Option<Value>;
     /// Update the value for an existing key.
@@ -213,8 +213,8 @@ impl KvStore for Kvin {
         true
     }
 
-    fn get(&self, _key: &Key) -> Option<&Value> {
-        panic!("Kvin Lab 3: use get_borrowed() or get_owned()");
+    fn get(&self, _key: &Key) -> Option<Value> {
+        self.get_owned(_key)
     }
 
     fn delete(&mut self, key: &Key) -> Option<Value> {
