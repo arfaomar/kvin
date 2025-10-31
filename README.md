@@ -21,7 +21,7 @@ let mut store = Kvin::new();
 
 ```rust
 fn put(&mut self, key: Key, value: Value);
-fn get(&self, key: &Key) -> Option<&Value>;
+fn get(&self, key: &Key) -> Option<Value>;
 fn delete(&mut self, key: &Key) -> Option<Value>;
 fn update(&mut self, key: &Key, new_value: Value) -> bool;
 ```
@@ -30,22 +30,7 @@ fn update(&mut self, key: &Key, new_value: Value) -> bool;
 
 ## 🧪 Example Usage
 
-```rust
-use kvin::{Kvin, Key, Value};
-
-fn main() {
-    let mut store = Kvin::new();
-
-    store.put(Key::from("language"), Value::from("Rust"));
-    println!("{:?}", store.get(&Key::from("language"))); // Some(Text("Rust"))
-
-    store.update(&Key::from("language"), Value::from("Kvin v2"));
-    println!("{:?}", store.get(&Key::from("language"))); // Some(Text("Kvin v2"))
-
-    store.delete(&Key::from("language"));
-    println!("{:?}", store.get(&Key::from("language"))); // None
-}
-```
+See the [examples/ex2.rs](examples/ex2.rs) file for a simple demonstration of how to use the Kvin key–value store.
 
 Run it with:
 

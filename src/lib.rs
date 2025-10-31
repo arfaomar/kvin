@@ -1,2 +1,2 @@
 pub mod kvin;
-pub use kvin::{Key, KvStore, Kvin, Value};
+pub use kvin::{BorrowedValue, Key, KvStore, Kvin, Value, deserialize_borrowed, serialize_value};
