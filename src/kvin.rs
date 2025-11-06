@@ -76,14 +76,14 @@ fn read_i64_le(src: &[u8]) -> i64 {
 pub trait KvStore {
     /// Insert a key-value pair.
     fn put(&mut self, key: Key, value: Value) -> bool;
-    /// Retrieve a value by key.
-    fn get(&self, key: &Key) -> Option<Value>;
+    /// Return a zero-copy value by key.
+    fn get(&self, key: &Key) -> Option<BorrowedValue<'_>>;
     /// Delete a key and return its value if it existed.
     fn delete(&mut self, key: &Key) -> Option<Value>;
     /// Update the value for an existing key.
     fn update(&mut self, key: &Key, new_value: Value) -> bool;
-    /// Zero-copy borrowed get.
-    fn get_borrowed<'a>(&'a self, key: &Key) -> Option<BorrowedValue<'a>>;
+    /// Return an owned copy of a value by key.
+    fn get_owned(&self, key: &Key) -> Option<Value>;
 }
 
 /// The actual store implementation.
@@ -103,8 +103,11 @@ impl Kvin {
             index: HashMap::new(),
         }
     }
-    pub fn get_owned(&self, key: &Key) -> Option<Value> {
-        self.get_borrowed(key).map(|bv| bv.to_owned())
+    /// zero-copy borrowed get method.
+    pub fn get_borrowed<'a>(&'a self, key: &Key) -> Option<BorrowedValue<'a>> {
+        let off = *self.index.get(key)?;
+        let (bv, _len) = deserialize_borrowed(&self.buf[off..])?;
+        Some(bv)
     }
 }
 
@@ -213,8 +216,8 @@ impl KvStore for Kvin {
         true
     }
 
-    fn get(&self, _key: &Key) -> Option<Value> {
-        self.get_owned(_key)
+    fn get(&self, _key: &Key) -> Option<BorrowedValue<'_>> {
+        self.get_borrowed(_key)
     }
 
     fn delete(&mut self, key: &Key) -> Option<Value> {
@@ -232,10 +235,8 @@ impl KvStore for Kvin {
         true
     }
 
-    fn get_borrowed<'a>(&'a self, key: &Key) -> Option<BorrowedValue<'a>> {
-        let off = *self.index.get(key)?;
-        let (bv, _len) = deserialize_borrowed(&self.buf[off..])?;
-        Some(bv)
+    fn get_owned(&self, key: &Key) -> Option<Value> {
+        self.get_borrowed(key).map(|bv| bv.to_owned())
     }
 }
 

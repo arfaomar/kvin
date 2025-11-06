@@ -11,21 +11,21 @@ mod tests {
         // Attempt to overwrite existing key should fail
         assert!(!store.put(Key::from("language"), Value::from("Go")));
 
-        // 🔹 Check get() (returns owned Value)
+        // get() now returns BorrowedValue (borrowed access)
         assert_eq!(
             store.get(&Key::from("language")),
-            Some(Value::Text("Rust".into()))
+            Some(BorrowedValue::Text("Rust"))
         );
-        assert_eq!(store.get(&Key::from(1)), Some(Value::Bool(true)));
+        assert_eq!(store.get(&Key::from(1)), Some(BorrowedValue::Bool(true)));
 
-        // 🔹 Check get_owned() explicitly (same behavior)
+        // get_owned() explicitly clones into Value
         assert_eq!(
             store.get_owned(&Key::from("language")),
             Some(Value::Text("Rust".into()))
         );
         assert_eq!(store.get_owned(&Key::from(1)), Some(Value::Bool(true)));
 
-        // 🔹 Check borrowed version (zero-copy access)
+        // Check get_borrowed() directly (same as get)
         assert_eq!(
             store.get_borrowed(&Key::from("language")),
             Some(BorrowedValue::Text("Rust"))
@@ -41,7 +41,7 @@ mod tests {
         // Both get() and get_owned() must see the new value
         assert_eq!(
             store.get(&Key::from(42)),
-            Some(Value::Text("universe".into()))
+            Some(BorrowedValue::Text("universe"))
         );
         assert_eq!(
             store.get_owned(&Key::from(42)),
