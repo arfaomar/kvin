@@ -11,24 +11,24 @@ fn main() {
     assert!(!store.put(Key::from("language"), Value::from("Go")));
 
     // get() now returns BorrowedValue
-    println!("{:?}", store.get(&Key::from("language"))); // Some(BorrowedValue::Text("Rust"))
-    println!("{:?}", store.get(&Key::from(1))); // Some(BorrowedValue::Bool(true))
+    println!("{:?}", store.get("language")); // Some(BorrowedValue::Text("Rust"))
+    println!("{:?}", store.get(1)); // Some(BorrowedValue::Bool(true))
 
     // get_owned() returns Value
-    println!("{:?}", store.get_owned(&Key::from("language"))); // Some(Value::Text("Rust"))
-    println!("{:?}", store.get_owned(&Key::from(1))); // Some(Value::Bool(true))
+    println!("{:?}", store.get_owned("language")); // Some(Value::Text("Rust"))
+    println!("{:?}", store.get_owned(1)); // Some(Value::Bool(true))
 
     // get_borrowed() is same as get()
     println!("{:?}", store.get_borrowed(&Key::from("language"))); // Some(BorrowedValue::Text("Rust"))
 
     // Update existing key
     store.update(&Key::from("language"), Value::from("C++"));
-    println!("{:?}", store.get(&Key::from("language"))); // Some(BorrowedValue::Text("C++"))
+    println!("{:?}", store.get("language")); // Some(BorrowedValue::Text("C++"))
 
     // Delete a key
-    let deleted = store.delete(&Key::from(1));
+    let deleted = store.delete(1);
     println!("{:?}", deleted); // Some(Value::Bool(true))
 
     // After delete
-    println!("{:?}", store.get(&Key::from(1))); // None
+    println!("{:?}", store.get(1)); // None
 }

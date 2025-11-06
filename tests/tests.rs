@@ -13,17 +13,17 @@ mod tests {
 
         // get() now returns BorrowedValue (borrowed access)
         assert_eq!(
-            store.get(&Key::from("language")),
+            store.get("language"),
             Some(BorrowedValue::Text("Rust"))
         );
-        assert_eq!(store.get(&Key::from(1)), Some(BorrowedValue::Bool(true)));
+        assert_eq!(store.get(1), Some(BorrowedValue::Bool(true)));
 
         // get_owned() explicitly clones into Value
         assert_eq!(
-            store.get_owned(&Key::from("language")),
+            store.get_owned("language"),
             Some(Value::Text("Rust".into()))
         );
-        assert_eq!(store.get_owned(&Key::from(1)), Some(Value::Bool(true)));
+        assert_eq!(store.get_owned(1), Some(Value::Bool(true)));
 
         // Check get_borrowed() directly (same as get)
         assert_eq!(
@@ -40,11 +40,11 @@ mod tests {
 
         // Both get() and get_owned() must see the new value
         assert_eq!(
-            store.get(&Key::from(42)),
+            store.get(42),
             Some(BorrowedValue::Text("universe"))
         );
         assert_eq!(
-            store.get_owned(&Key::from(42)),
+            store.get_owned(42),
             Some(Value::Text("universe".into()))
         );
     }
@@ -60,11 +60,11 @@ mod tests {
         let mut store = Kvin::new();
         assert!(store.put(Key::from("remove"), Value::from(123)));
 
-        assert_eq!(store.delete(&Key::from("remove")), Some(Value::Int(123)));
+        assert_eq!(store.delete("remove"), Some(Value::Int(123)));
 
         // Should now be gone in both get() and get_owned()
-        assert_eq!(store.get(&Key::from("remove")), None);
-        assert_eq!(store.get_owned(&Key::from("remove")), None);
+        assert_eq!(store.get("remove"), None);
+        assert_eq!(store.get_owned("remove"), None);
     }
 
     #[test]

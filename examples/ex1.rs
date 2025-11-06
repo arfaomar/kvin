@@ -17,15 +17,15 @@ fn main() {
         "put name again: {}",
         store.put(Key::from("name"), Value::from("Kvin v3"))
     );
-    println!("name after failed put: {:?}", store.get(&Key::from("name")));
+    println!("name after failed put: {:?}", store.get("name"));
 
-    println!("int key -> {:?}", store.get(&Key::from(1)));
+    println!("int key -> {:?}", store.get(1));
 
     store.update(&Key::from("name"), Value::from("Kvin v2"));
-    println!("updated name -> {:?}", store.get(&Key::from("name")));
+    println!("updated name -> {:?}", store.get("name"));
 
-    store.delete(&Key::from(1));
-    println!("after delete -> {:?}", store.get(&Key::from(1)));
+    store.delete(1);
+    println!("after delete -> {:?}", store.get(1));
 
     println!("\nFinal store: {:#?}", store);
 }
