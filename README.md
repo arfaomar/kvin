@@ -21,9 +21,10 @@ let mut store = Kvin::new();
 
 ```rust
 fn put(&mut self, key: Key, value: Value);
-fn get(&self, key: &Key) -> Option<Value>;
+fn get(&self, key: &Key) -> Option<BorrowedValue<'_>>;
 fn delete(&mut self, key: &Key) -> Option<Value>;
 fn update(&mut self, key: &Key, new_value: Value) -> bool;
+fn get_owned(&self, key: &Key) -> Option<Value>;
 ```
 
 ---
