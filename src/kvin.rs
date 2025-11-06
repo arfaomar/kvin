@@ -1,3 +1,4 @@
+use std::borrow::ToOwned;
 use std::collections::HashMap;
 /// Represents possible key types.
 /// Must implement Eq + Hash for use in HashMap.
@@ -30,9 +31,9 @@ impl<'a> BorrowedValue<'a> {
     pub fn to_owned(&self) -> Value {
         match self {
             BorrowedValue::Int(i) => Value::Int(*i),
-            BorrowedValue::Text(s) => Value::Text((*s).to_string()),
+            BorrowedValue::Text(s) => Value::Text((*s).to_owned()),
             BorrowedValue::Bool(b) => Value::Bool(*b),
-            BorrowedValue::Blob(b) => Value::Blob(b.to_vec()),
+            BorrowedValue::Blob(b) => Value::Blob((*b).to_owned()),
         }
     }
 }
