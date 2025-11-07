@@ -1,4 +1,11 @@
 use crate::{BorrowedValue, Value};
+use crc32fast::Hasher;
+
+pub fn compute_crc32(payload: &[u8]) -> u32 {
+    let mut hasher = Hasher::new();
+    hasher.update(payload);
+    hasher.finalize()
+}
 
 /// On-disk type tags (1 byte)
 const TAG_INT: u8 = 1;
@@ -7,13 +14,24 @@ const TAG_BOOL: u8 = 3;
 const TAG_BLOB: u8 = 4;
 
 /// Entry header layout (little-endian):
-/// [total_len: u64][tag: u8]  followed by the tagged payload:
+/// [length: u64][checksum: u32][tag: u8] (=> 13 Bytes) followed by the tagged payload:
 /// - Int:  [i64: 8]
 /// - Bool: [u8: 1]
 /// - Text: [len: u64][bytes: len]
 /// - Blob: [len: u64][bytes: len]
 ///
-/// `total_len` counts bytes after the u64 length field itself (i.e. tag + payload).
+/// `length` counts bytes after the u64 length field itself (i.e. checksum + tag + payload).
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct RawHeader {
+    pub length: u64,
+    pub tag: u8,
+}
+
+pub const HEADER_SIZE: usize = std::mem::size_of::<RawHeader>();
+
+
+
 #[inline]
 fn write_u64_le(dst: &mut Vec<u8>, v: u64) {
     dst.extend_from_slice(&v.to_le_bytes());
@@ -37,12 +55,14 @@ fn read_i64_le(src: &[u8]) -> i64 {
 
 
 pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
-    let start = buf.len();
-    // Reserve room: [len:u64][tag:u8] + payload
+    let start_pos = buf.len();
+
+    // Reserve room: [length:u64][checksum:u32][tag:u8] + payload
     // First, push a placeholder for len to fill later:
-    let len_pos = buf.len();
+    let length_pos = buf.len();
     write_u64_le(buf, 0); // placeholder
-    // tag
+
+    // Tag
     match value {
         Value::Int(i) => {
             buf.push(TAG_INT);
@@ -66,12 +86,12 @@ pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
     }
 
     // total_len = (current_len - after_len_field)
-    let after_len = len_pos + 8;
+    let after_len = length_pos + 8;
     let total_len = (buf.len() - after_len) as u64;
     // write it back
-    buf[len_pos..len_pos + 8].copy_from_slice(&total_len.to_le_bytes());
+    buf[length_pos..length_pos + 8].copy_from_slice(&total_len.to_le_bytes());
 
-    start
+    start_pos
 }
 
 
