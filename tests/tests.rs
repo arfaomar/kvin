@@ -12,10 +12,7 @@ mod tests {
         assert!(!store.put(Key::from("language"), Value::from("Go")));
 
         // get() now returns BorrowedValue (borrowed access)
-        assert_eq!(
-            store.get("language"),
-            Some(BorrowedValue::Text("Rust"))
-        );
+        assert_eq!(store.get("language"), Some(BorrowedValue::Text("Rust")));
         assert_eq!(store.get(1), Some(BorrowedValue::Bool(true)));
 
         // get_owned() explicitly clones into Value
@@ -39,14 +36,8 @@ mod tests {
         assert!(store.update(&Key::from(42), Value::from("universe")));
 
         // Both get() and get_owned() must see the new value
-        assert_eq!(
-            store.get(42),
-            Some(BorrowedValue::Text("universe"))
-        );
-        assert_eq!(
-            store.get_owned(42),
-            Some(Value::Text("universe".into()))
-        );
+        assert_eq!(store.get(42), Some(BorrowedValue::Text("universe")));
+        assert_eq!(store.get_owned(42), Some(Value::Text("universe".into())));
     }
 
     #[test]
@@ -80,4 +71,54 @@ mod tests {
 
         assert_eq!(decoded, original);
     }
+}
+
+#[test]
+#[should_panic(expected = "checksum mismatch")]
+fn test_checksum_detection() {
+    let mut buf = Vec::new();
+    let off = kvin::serialize_value(&mut buf, &kvin::Value::from("hello"));
+    // corrupt one byte in the body
+    buf[off + kvin::RAW_HEADER_SIZE + 1] ^= 0xFF;
+    // should panic now
+    let _ = kvin::deserialize_borrowed(&buf[off..]);
+}
+
+#[test]
+fn test_unsafe_header_roundtrip() {
+    use kvin::{RAW_HEADER_SIZE, RawHeader, serialize_unsafe};
+    let h = RawHeader {
+        total_len: 42,
+        checksum: 0xABCD1234,
+        tag: 7,
+    };
+    let mut buf = Vec::new();
+    unsafe {
+        serialize_unsafe(&mut buf, &h);
+    }
+    assert_eq!(buf.len(), RAW_HEADER_SIZE);
+    let out = unsafe { kvin::deserialize_unsafe(&buf).unwrap() };
+
+    // Copy packed fields safely into locals
+    let total_len_out = out.total_len;
+    let checksum_out = out.checksum;
+    let tag_out = out.tag;
+
+    let total_len_h = h.total_len;
+    let checksum_h = h.checksum;
+    let tag_h = h.tag;
+
+    assert_eq!(total_len_out, total_len_h);
+    assert_eq!(checksum_out, checksum_h);
+    assert_eq!(tag_out, tag_h);
+}
+
+#[test]
+#[should_panic(expected = "checksum mismatch")]
+fn test_checksum_mismatch_panics() {
+    let mut buf = Vec::new();
+    let off = kvin::serialize_value(&mut buf, &kvin::Value::from("hello"));
+    // corrupt one byte
+    buf[off + kvin::RAW_HEADER_SIZE + 1] ^= 0xFF;
+    let _ = kvin::deserialize_borrowed(&buf[off..]);
 }

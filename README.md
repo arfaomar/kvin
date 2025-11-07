@@ -31,10 +31,10 @@ fn get_owned(&self, key: &Key) -> Option<Value>;
 
 ## 🧪 Example Usage
 
-See the [examples/ex2.rs](examples/ex2.rs) file for a simple demonstration of how to use the Kvin key–value store.
+See the [examples](examples) file for a simple demonstration of how to use the Kvin key–value store.
 
 Run it with:
 
 ```bash
-cargo run --example ex1
+cargo run --example ex<number>
 ```

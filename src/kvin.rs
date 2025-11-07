@@ -1,3 +1,4 @@
+use crc::{CRC_32_ISO_HDLC, Crc};
 use std::borrow::ToOwned;
 use std::collections::HashMap;
 /// Represents possible key types.
@@ -38,6 +39,16 @@ impl<'a> BorrowedValue<'a> {
     }
 }
 
+#[repr(C, packed)]
+#[derive(Clone, Copy)]
+pub struct RawHeader {
+    pub total_len: u64, // body length
+    pub checksum: u32,  // CRC32 of body
+    pub tag: u8,        // TAG_INT / TAG_TEXT / TAG_BOOL / TAG_BLOB
+}
+
+pub const RAW_HEADER_SIZE: usize = std::mem::size_of::<RawHeader>();
+
 /// On-disk type tags (1 byte)
 const TAG_INT: u8 = 1;
 const TAG_TEXT: u8 = 2;
@@ -45,13 +56,18 @@ const TAG_BOOL: u8 = 3;
 const TAG_BLOB: u8 = 4;
 
 /// Entry header layout (little-endian):
-/// [total_len: u64][tag: u8]  followed by the tagged payload:
+/// [total_len: u64][checksum: u32][tag: u8]  followed by the tagged payload:
 /// - Int:  [i64: 8]
 /// - Bool: [u8: 1]
 /// - Text: [len: u64][bytes: len]
 /// - Blob: [len: u64][bytes: len]
 ///
-/// `total_len` counts bytes after the u64 length field itself (i.e. tag + payload).
+/// Total header size: 13 bytes (`RAW_HEADER_SIZE`)
+///
+/// `total_len` counts the number of bytes in the payload (after the header),
+/// and `checksum` is the CRC32 checksum of that payload. The `tag` identifies
+/// the data type of the value being serialized.
+
 #[inline]
 fn write_u64_le(dst: &mut Vec<u8>, v: u64) {
     dst.extend_from_slice(&v.to_le_bytes());
@@ -71,6 +87,24 @@ fn read_i64_le(src: &[u8]) -> i64 {
     let mut a = [0u8; 8];
     a.copy_from_slice(&src[..8]);
     i64::from_le_bytes(a)
+}
+
+/// SAFETY:
+/// Caller must ensure that `dst` is valid for at least `RAW_HEADER_SIZE` bytes.
+#[inline]
+unsafe fn write_header_unchecked(dst: *mut u8, hdr: &RawHeader) {
+    // SAFETY: caller guarantees dst..dst+RAW_HEADER_SIZE is valid and aligned enough for byte writes.
+    unsafe {
+        std::ptr::copy_nonoverlapping((hdr as *const RawHeader).cast::<u8>(), dst, RAW_HEADER_SIZE);
+    }
+}
+
+/// SAFETY:
+/// Caller must ensure that `src` is valid for at least `RAW_HEADER_SIZE` bytes.
+#[inline]
+unsafe fn read_header_unchecked(src: *const u8) -> RawHeader {
+    // SAFETY: caller guarantees src..src+RAW_HEADER_SIZE is readable and may be unaligned.
+    unsafe { std::ptr::read_unaligned(src.cast::<RawHeader>()) }
 }
 
 /// Trait that defines the Kvin API.
@@ -122,94 +156,134 @@ impl Kvin {
     }
 }
 
+/// SAFETY:
+/// The caller must ensure that `buf` is a valid, writable `Vec<u8>`.
+/// This function performs unchecked pointer writes but internally resizes
+/// the buffer to make space for the header.
+pub unsafe fn serialize_unsafe(buf: &mut Vec<u8>, header: &RawHeader) -> usize {
+    let start = buf.len();
+    buf.resize(start + RAW_HEADER_SIZE, 0);
+    let dst = unsafe { buf.as_mut_ptr().add(start) };
+    unsafe { write_header_unchecked(dst, header) };
+    start
+}
+
+/// SAFETY:
+/// The caller must ensure that `src` points to at least `RAW_HEADER_SIZE` readable bytes.
+/// This function reads a `RawHeader` directly from the slice without alignment checks.
+pub unsafe fn deserialize_unsafe(src: &[u8]) -> Option<RawHeader> {
+    if src.len() < RAW_HEADER_SIZE {
+        return None;
+    }
+    Some(unsafe { read_header_unchecked(src.as_ptr()) })
+}
+
 pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
     let start = buf.len();
-    // Reserve room: [len:u64][tag:u8] + payload
-    // First, push a placeholder for len to fill later:
-    let len_pos = buf.len();
-    write_u64_le(buf, 0); // placeholder
-    // tag
+
+    // 1) Reserve header space
+    buf.resize(buf.len() + RAW_HEADER_SIZE, 0);
+
+    // 2) Write Body (payload only; tag moved into header now)
+    let body_start = buf.len();
     match value {
         Value::Int(i) => {
-            buf.push(TAG_INT);
+            // payload: i64
             write_i64_le(buf, *i);
+            // tag is TAG_INT (in header)
         }
         Value::Bool(b) => {
-            buf.push(TAG_BOOL);
             buf.push(if *b { 1 } else { 0 });
         }
         Value::Text(s) => {
-            buf.push(TAG_TEXT);
             let bytes = s.as_bytes();
             write_u64_le(buf, bytes.len() as u64);
             buf.extend_from_slice(bytes);
         }
         Value::Blob(bytes) => {
-            buf.push(TAG_BLOB);
             write_u64_le(buf, bytes.len() as u64);
             buf.extend_from_slice(bytes);
         }
     }
+    let body_len = buf.len() - body_start;
 
-    // total_len = (current_len - after_len_field)
-    let after_len = len_pos + 8;
-    let total_len = (buf.len() - after_len) as u64;
-    // write it back
-    buf[len_pos..len_pos + 8].copy_from_slice(&total_len.to_le_bytes());
+    // 3) Build header (tag depends on the variant)
+    let tag = match value {
+        Value::Int(_) => TAG_INT,
+        Value::Bool(_) => TAG_BOOL,
+        Value::Text(_) => TAG_TEXT,
+        Value::Blob(_) => TAG_BLOB,
+    };
+
+    let header = RawHeader {
+        total_len: body_len as u64,
+        checksum: crc32(&buf[body_start..]),
+        tag,
+    };
+
+    // SAFETY: `buf` was just resized to make room for the header, so writing
+    // `RAW_HEADER_SIZE` bytes into it is valid and properly aligned.
+    unsafe {
+        serialize_unsafe(buf, &header);
+    }
 
     start
 }
 
-/// Returns (borrowed_value, total_entry_len_bytes)
+/// Returns (BorrowedValue, full_entry_size_including_header)
 pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Option<(BorrowedValue<'a>, usize)> {
-    // need at least 8 (len) + 1 (tag)
-    if src.len() < 9 {
+    // Need header first
+    if src.len() < RAW_HEADER_SIZE {
         return None;
     }
 
-    let total_len = read_u64_le(&src[..8]) as usize;
-    // total_len counts tag + payload, so full entry size is 8 + total_len
-    if total_len == 0 {
-        return None;
-    } // invalid: must contain at least the tag
-    if src.len() < 8 + total_len {
-        return None;
-    } // ensure full entry is available
+    // SAFETY: `src` is validated to be at least `RAW_HEADER_SIZE` bytes above,
+    // so deserializing a `RawHeader` from it is safe.
+    let header = unsafe { deserialize_unsafe(src)? };
 
-    let tag = src[8];
-    let payload_len = total_len - 1; // exclude tag
-    let payload = &src[9..9 + payload_len];
+    let body_len = header.total_len as usize;
+    let full_size = RAW_HEADER_SIZE + body_len;
 
-    match tag {
+    if src.len() < full_size {
+        return None; // incomplete entry
+    }
+
+    let body = &src[RAW_HEADER_SIZE..full_size];
+
+    // 2) Verify checksum before parsing
+    if crc32(body) != header.checksum {
+        panic!("checksum mismatch in entry body");
+    }
+
+    // 3) Decode by tag from header, parsing the Body only
+    match header.tag {
         TAG_INT => {
-            if payload.len() < 8 {
+            if body.len() < 8 {
                 return None;
             }
-            Some((
-                BorrowedValue::Int(read_i64_le(&payload[..8])),
-                8 + total_len,
-            ))
+            let i = read_i64_le(&body[..8]);
+            Some((BorrowedValue::Int(i), full_size))
         }
         TAG_BOOL => {
-            if payload.is_empty() {
+            if body.is_empty() {
                 return None;
             }
-            Some((BorrowedValue::Bool(payload[0] != 0), 8 + total_len))
+            Some((BorrowedValue::Bool(body[0] != 0), full_size))
         }
         TAG_TEXT | TAG_BLOB => {
-            if payload.len() < 8 {
+            if body.len() < 8 {
                 return None;
             }
-            let n = read_u64_le(&payload[..8]) as usize;
-            if payload.len() < 8 + n {
+            let n = read_u64_le(&body[..8]) as usize;
+            if body.len() < 8 + n {
                 return None;
             }
-            let bytes = &payload[8..8 + n];
-            if tag == TAG_TEXT {
+            let bytes = &body[8..8 + n];
+            if header.tag == TAG_TEXT {
                 let s = std::str::from_utf8(bytes).ok()?;
-                Some((BorrowedValue::Text(s), 8 + total_len))
+                Some((BorrowedValue::Text(s), full_size))
             } else {
-                Some((BorrowedValue::Blob(bytes), 8 + total_len))
+                Some((BorrowedValue::Blob(bytes), full_size))
             }
         }
         _ => None,
@@ -244,7 +318,7 @@ impl KvStore for Kvin {
         self.get_borrowed(&key)
     }
 
-   fn delete<K>(&mut self, key: K) -> Option<Value>
+    fn delete<K>(&mut self, key: K) -> Option<Value>
     where
         K: Into<Key>,
     {
@@ -310,4 +384,11 @@ impl From<i32> for Value {
     fn from(i: i32) -> Self {
         Value::Int(i as i64)
     }
+}
+
+const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+
+#[inline]
+fn crc32(bytes: &[u8]) -> u32 {
+    CRC32.checksum(bytes)
 }
