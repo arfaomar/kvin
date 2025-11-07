@@ -224,8 +224,10 @@ pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
     // SAFETY: `buf` was just resized to make room for the header, so writing
     // `RAW_HEADER_SIZE` bytes into it is valid and properly aligned.
     unsafe {
-        serialize_unsafe(buf, &header);
+        let dst = buf.as_mut_ptr().add(start);
+        write_header_unchecked(dst, &header);
     }
+
 
     start
 }
