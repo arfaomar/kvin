@@ -1,2 +1,11 @@
 pub mod kvin;
-pub use kvin::{BorrowedValue, Key, KvStore, Kvin, Value, deserialize_borrowed, serialize_value};
+mod serialization;
+
+pub use kvin::{
+    BorrowedValue, Key, KvStore, Kvin,  Value,
+};
+
+pub use serialization::{
+    RAW_HEADER_SIZE, RawHeader,
+    deserialize_borrowed, deserialize_unsafe, serialize_unsafe, serialize_value,
+};
