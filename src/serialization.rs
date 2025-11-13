@@ -1,8 +1,6 @@
 use crate::{BorrowedValue, Value};
 use crc::{CRC_32_ISO_HDLC, Crc};
 
-
-
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
 pub struct RawHeader {
@@ -13,15 +11,11 @@ pub struct RawHeader {
 
 pub const RAW_HEADER_SIZE: usize = std::mem::size_of::<RawHeader>();
 
-
-
 /// On-disk type tags (1 byte)
 const TAG_INT: u8 = 1;
 const TAG_TEXT: u8 = 2;
 const TAG_BOOL: u8 = 3;
 const TAG_BLOB: u8 = 4;
-
-
 
 /// Entry header layout (little-endian):
 /// [total_len: u64][checksum: u32][tag: u8]  followed by the tagged payload:
@@ -57,9 +51,6 @@ fn read_i64_le(src: &[u8]) -> i64 {
     i64::from_le_bytes(a)
 }
 
-
-
-
 /// SAFETY:
 /// Caller must ensure that `dst` is valid for at least `RAW_HEADER_SIZE` bytes.
 #[inline]
@@ -78,8 +69,6 @@ unsafe fn read_header_unchecked(src: *const u8) -> RawHeader {
     unsafe { std::ptr::read_unaligned(src.cast::<RawHeader>()) }
 }
 
-
-
 /// SAFETY:
 /// The caller must ensure that `buf` is a valid, writable `Vec<u8>`.
 /// This function performs unchecked pointer writes but internally resizes
@@ -87,6 +76,8 @@ unsafe fn read_header_unchecked(src: *const u8) -> RawHeader {
 pub unsafe fn serialize_unsafe(buf: &mut Vec<u8>, header: &RawHeader) -> usize {
     let start = buf.len();
     buf.resize(start + RAW_HEADER_SIZE, 0);
+    // SAFETY: `buf` was resized to at least `start + RAW_HEADER_SIZE`, so writing
+    // `RAW_HEADER_SIZE` bytes starting at `dst` is valid. We use an unaligned write.
     let dst = unsafe { buf.as_mut_ptr().add(start) };
     unsafe { write_header_unchecked(dst, header) };
     start
@@ -101,8 +92,6 @@ pub unsafe fn deserialize_unsafe(src: &[u8]) -> Option<RawHeader> {
     }
     Some(unsafe { read_header_unchecked(src.as_ptr()) })
 }
-
-
 
 /// Serialize a `Value` into `buf`, returning the starting offset of the serialized entry.
 pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
@@ -154,7 +143,6 @@ pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
         let dst = buf.as_mut_ptr().add(start);
         write_header_unchecked(dst, &header);
     }
-
 
     start
 }
@@ -218,7 +206,6 @@ pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Option<(BorrowedValue<'a>, usi
         _ => None,
     }
 }
-
 
 /// CRC32 computation
 const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
