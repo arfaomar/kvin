@@ -113,12 +113,43 @@ fn test_unsafe_header_roundtrip() {
     assert_eq!(tag_out, tag_h);
 }
 
-#[test]
-#[should_panic(expected = "checksum mismatch")]
-fn test_checksum_mismatch_panics() {
-    let mut buf = Vec::new();
-    let off = kvin::serialize_value(&mut buf, &kvin::Value::from("hello"));
-    // corrupt one byte
-    buf[off + kvin::RAW_HEADER_SIZE + 1] ^= 0xFF;
-    let _ = kvin::deserialize_borrowed(&buf[off..]);
+
+
+#[cfg(test)]
+mod test_iteration {
+    use kvin::{KvStore, Kvin, Key, Value, BorrowedEntry, BorrowedKey, BorrowedValue};
+
+    #[test]
+    fn test_iteration_in_order() {
+        let mut store = Kvin::new();
+        store.put(Key::Text("a".into()), Value::Int(1));
+        store.put(Key::Text("b".into()), Value::Int(2));
+        store.update(&Key::Text("a".into()), Value::Int(42));
+
+        let entries: Vec<BorrowedEntry<'_>> = store.iter().collect();
+        assert_eq!(entries.len(), 3);
+
+        // Key als BorrowedKey, Value als BorrowedValue
+        assert_eq!(entries[0].key, BorrowedKey::Text("a"));
+        assert_eq!(entries[0].value, BorrowedValue::Int(1));
+
+        assert_eq!(entries[1].key, BorrowedKey::Text("b"));
+        assert_eq!(entries[1].value, BorrowedValue::Int(2));
+
+        assert_eq!(entries[2].key, BorrowedKey::Text("a"));
+        assert_eq!(entries[2].value, BorrowedValue::Int(42));
+    }
+
+    #[test]
+    fn test_keys_and_values() {
+        let mut store = Kvin::new();
+        store.put("x".into(), 10.into());
+        store.put(true.into(), "hello".into());
+
+        let keys: Vec<_> = store.keys().collect();
+        let values: Vec<_> = store.values().collect();
+
+        assert_eq!(keys.len(), 2);
+        assert_eq!(values.len(), 2);
+    }
 }

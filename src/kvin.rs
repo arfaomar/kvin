@@ -1,5 +1,6 @@
 use std::borrow::ToOwned;
 use std::collections::HashMap;
+use crate::{ RAW_HEADER_SIZE};
 use crate::serialization::{deserialize_borrowed, serialize_value};
 
 
@@ -22,6 +23,19 @@ pub enum Value {
     Blob(Vec<u8>),
 }
 
+#[derive(Debug, PartialEq)]
+pub struct BorrowedEntry<'a> {
+    pub key: BorrowedKey<'a>,
+    pub value: BorrowedValue<'a>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum BorrowedKey<'a> {
+    Int(i64),
+    Text(&'a str),
+    Bool(bool),
+}
+
 /// Borrowed view of values, zero-copy from the byte buffer.
 #[derive(Debug, PartialEq)]
 pub enum BorrowedValue<'a> {
@@ -40,6 +54,55 @@ impl<'a> BorrowedValue<'a> {
             BorrowedValue::Blob(b) => Value::Blob((*b).to_owned()),
         }
     }
+}
+
+pub struct StoreIterator<'a> {
+    buf: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Iterator for StoreIterator<'a> {
+    type Item = BorrowedEntry<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // Check if we've reached the end of the buffer
+            if self.pos + RAW_HEADER_SIZE > self.buf.len() {
+                return None;
+            }
+
+            // Try to parse the next entry
+            match parse_entry(&self.buf[self.pos..]) {
+                Some((key, value, size)) => {
+                    self.pos += size;
+                    return Some(BorrowedEntry { key, value });
+                }
+                // Malformed entry, stop iteration
+                None => return None,
+            }
+        }
+    }
+}
+
+fn parse_entry<'a>(src: &'a [u8]) -> Option<(BorrowedKey<'a>, BorrowedValue<'a>, usize)> {
+    // 1. Parse Key
+    let (key_bv, key_size) = deserialize_borrowed(src)?;
+    let key = match key_bv {
+        BorrowedValue::Int(i) => BorrowedKey::Int(i),
+        BorrowedValue::Text(s) => BorrowedKey::Text(s),
+        BorrowedValue::Bool(b) => BorrowedKey::Bool(b),
+        _ => return None,
+    };
+
+    // 2. Parse Value
+    let value_start = key_size;
+    if value_start >= src.len() {
+        return None;
+    }
+    let (value_bv, value_size) = deserialize_borrowed(&src[value_start..])?;
+
+    let total_size = key_size + value_size;
+    Some((key, value_bv, total_size))
 }
 
 /// Trait that defines the Kvin API.
@@ -89,6 +152,23 @@ impl Kvin {
         let (bv, _len) = deserialize_borrowed(&self.buf[off..])?;
         Some(bv)
     }
+
+
+    /// Iterate over all entries in the store.
+    pub fn iter(&self) -> StoreIterator<'_> {
+        StoreIterator {
+            buf: &self.buf,
+            pos: 0,
+        }
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = BorrowedKey<'_>> {
+        self.iter().map(|entry| entry.key)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = BorrowedValue<'_>> {
+        self.iter().map(|entry| entry.value)
+    }
 }
 
 impl KvStore for Kvin {
@@ -97,7 +177,10 @@ impl KvStore for Kvin {
             // do not overwrite existing key (test expects false)
             return false;
         }
+
+        serialize_value(&mut self.buf, &Value::from(key.clone()));
         let off = serialize_value(&mut self.buf, &value);
+
         self.index.insert(key, off);
         true
     }
@@ -106,7 +189,10 @@ impl KvStore for Kvin {
         if !self.index.contains_key(key) {
             return false;
         }
+
+        serialize_value(&mut self.buf, &Value::from(key.clone()));
         let off = serialize_value(&mut self.buf, &new_value);
+
         self.index.insert(key.clone(), off);
         true
     }
@@ -184,5 +270,15 @@ impl From<i32> for Key {
 impl From<i32> for Value {
     fn from(i: i32) -> Self {
         Value::Int(i as i64)
+    }
+}
+
+impl From<Key> for Value {
+    fn from(key: Key) -> Self {
+        match key {
+            Key::Int(i) => Value::Int(i),
+            Key::Text(s) => Value::Text(s),
+            Key::Bool(b) => Value::Bool(b),
+        }
     }
 }

@@ -2,7 +2,7 @@ pub mod kvin;
 mod serialization;
 
 pub use kvin::{
-    BorrowedValue, Key, KvStore, Kvin,  Value,
+    BorrowedEntry, BorrowedKey, BorrowedValue, Key, KvStore, Kvin,  Value,
 };
 
 pub use serialization::{

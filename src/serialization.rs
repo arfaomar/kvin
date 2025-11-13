@@ -161,52 +161,38 @@ pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
 
 /// Returns (BorrowedValue, full_entry_size_including_header)
 pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Option<(BorrowedValue<'a>, usize)> {
-    // Need header first
     if src.len() < RAW_HEADER_SIZE {
         return None;
     }
 
-    // SAFETY: `src` is validated to be at least `RAW_HEADER_SIZE` bytes above,
-    // so deserializing a `RawHeader` from it is safe.
     let header = unsafe { deserialize_unsafe(src)? };
-
     let body_len = header.total_len as usize;
     let full_size = RAW_HEADER_SIZE + body_len;
 
     if src.len() < full_size {
-        return None; // incomplete entry
+        return None;
     }
 
     let body = &src[RAW_HEADER_SIZE..full_size];
 
-    // 2) Verify checksum before parsing
     if crc32(body) != header.checksum {
-        panic!("checksum mismatch in entry body");
+        panic!("checksum mismatch");
     }
 
-    // 3) Decode by tag from header, parsing the Body only
     match header.tag {
         TAG_INT => {
-            if body.len() < 8 {
-                return None;
-            }
+            if body.len() < 8 { return None; }
             let i = read_i64_le(&body[..8]);
             Some((BorrowedValue::Int(i), full_size))
         }
         TAG_BOOL => {
-            if body.is_empty() {
-                return None;
-            }
+            if body.is_empty() { return None; }
             Some((BorrowedValue::Bool(body[0] != 0), full_size))
         }
         TAG_TEXT | TAG_BLOB => {
-            if body.len() < 8 {
-                return None;
-            }
+            if body.len() < 8 { return None; }
             let n = read_u64_le(&body[..8]) as usize;
-            if body.len() < 8 + n {
-                return None;
-            }
+            if body.len() < 8 + n { return None; }
             let bytes = &body[8..8 + n];
             if header.tag == TAG_TEXT {
                 let s = std::str::from_utf8(bytes).ok()?;
