@@ -1,8 +1,6 @@
+use crate::{deserialize_borrowed, serialize_value};
 use std::borrow::ToOwned;
 use std::collections::HashMap;
-use crate::serialization::{deserialize_borrowed, serialize_value};
-
-
 
 /// Represents possible key types.
 /// Must implement Eq + Hash for use in HashMap.
@@ -23,12 +21,18 @@ pub enum Value {
 }
 
 /// Borrowed view of values, zero-copy from the byte buffer.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum BorrowedValue<'a> {
     Int(i64),
     Text(&'a str),
     Bool(bool),
     Blob(&'a [u8]),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BorrowedEntry<'a> {
+    pub key: &'a Key,
+    pub value: BorrowedValue<'a>,
 }
 
 impl<'a> BorrowedValue<'a> {
@@ -40,6 +44,33 @@ impl<'a> BorrowedValue<'a> {
             BorrowedValue::Blob(b) => Value::Blob((*b).to_owned()),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct StoreIter<'a> {
+    buf: &'a [u8],
+    inner: std::collections::hash_map::Iter<'a, Key, usize>,
+}
+
+impl<'a> Iterator for StoreIter<'a> {
+    type Item = BorrowedEntry<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key, &off) = self.inner.next()?;
+        let (value, _len) = deserialize_borrowed(&self.buf[off..])?;
+        Some(BorrowedEntry { key, value })
+    }
+}
+
+impl<'a> IntoIterator for &'a Kvin {
+    type Item = BorrowedEntry<'a>;
+    type IntoIter = StoreIter<'a>;
+    fn into_iter(self) -> Self::IntoIter { self.iter() }
+}
+
+impl<'a> std::iter::FusedIterator for StoreIter<'a> {}
+impl<'a> ExactSizeIterator for StoreIter<'a> {
+    fn len(&self) -> usize { self.inner.len() }
 }
 
 /// Trait that defines the Kvin API.
@@ -67,7 +98,7 @@ pub trait KvStore {
 }
 
 /// The actual store implementation.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Kvin {
     /// Append-only bytes (our “log”).
     buf: Vec<u8>,
@@ -88,6 +119,21 @@ impl Kvin {
         let off = *self.index.get(key)?;
         let (bv, _len) = deserialize_borrowed(&self.buf[off..])?;
         Some(bv)
+    }
+
+    pub fn iter(&self) -> StoreIter<'_> {
+        StoreIter {
+            buf: &self.buf,
+            inner: self.index.iter(),
+        }
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &Key> {
+        self.iter().map(|e| e.key)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = BorrowedValue<'_>> {
+        self.iter().map(|e| e.value)
     }
 }
 
