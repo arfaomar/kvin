@@ -148,6 +148,7 @@ pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
 }
 
 /// Returns (BorrowedValue, full_entry_size_including_header)
+/// todo: better error handling (Result type instead of option (LAB6)?
 pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Option<(BorrowedValue<'a>, usize)> {
     // Need header first
     if src.len() < RAW_HEADER_SIZE {
