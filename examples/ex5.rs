@@ -1,42 +1,62 @@
-use anyhow::Result;
-use kvin::{RAW_HEADER_SIZE, Value, deserialize_borrowed, serialize_value};
+use anyhow::{Context, Result};
+use kvin::{Key, KvStore, Kvin, Value};
 
 fn main() -> Result<()> {
-    println!("=== Example 5: Proper Error Handling with anyhow ===\n");
+    println!("=== Example 5: Error Handling with anyhow (User Perspective) ===\n");
 
-    // --- Serialize a valid value ---
+    // --- Part 1: Basic usage (no errors expected)
+    let mut store = Kvin::new();
+    store.put(Key::from("lang"), Value::from("Rust"));
+    store.put(Key::from("year"), Value::from(2025_i64));
+    store.put(Key::from("safe"), Value::from(true));
+
+    println!("Stored a few values safely.");
+    println!("  get(lang) -> {:?}", store.get("lang"));
+    println!("  get(year) -> {:?}", store.get("year"));
+    println!("  get(safe) -> {:?}", store.get("safe"));
+
+    // --- Part 2: Demonstrate that normal usage never returns Result
+    println!("\n--- Normal Kvin usage does NOT expose Result ---");
+    println!("Users only see `Option<T>`:");
+    println!("  get(nonexistent) -> {:?}", store.get("does_not_exist"));
+
+    // --- Part 3: Show anyhow-style error handling by manually corrupting data
+    println!("\n--- Introducing corruption to demonstrate anyhow error ---");
+
+    // We serialize a clean value manually (users normally do not do this)
     let mut buf = Vec::new();
-    let offset = serialize_value(&mut buf, &Value::from("hello world"));
+    let off = kvin::serialize_value(&mut buf, &Value::from("CorruptMe"));
 
-    println!("Serialized value at offset {}", offset);
+    // Corrupt one byte after the header
+    let header_size = kvin::RAW_HEADER_SIZE;
+    buf[off + header_size + 1] ^= 0xFF;
 
-    // --- Introduce corruption intentionally ---
-    println!("Corrupting encoded buffer...");
-    buf[offset + RAW_HEADER_SIZE + 2] ^= 0xAA;
+    println!("Corrupted a serialized entry intentionally.");
 
-    // --- Pattern-match on Result<Option<T>> ---
-    println!("Attempting deserialization:");
+    println!("\nAttempting to decode corrupted data...");
 
-    match deserialize_borrowed(&buf[offset..]) {
-        Ok(Some((bv, _len))) => {
-            println!("[OK] Decoded value: {:?}", bv);
+    match kvin::deserialize_borrowed(&buf[off..]) {
+        Ok(Some((val, _))) => {
+            println!("Unexpectedly succeeded: {:?}", val);
         }
         Ok(None) => {
-            println!("[INFO] Not enough data to decode yet");
+            println!("Not enough data available to decode.");
         }
         Err(e) => {
-            println!("[ERROR] Deserialization failed: {}", e);
+            println!("Deserialization failed with anyhow error:");
+            println!("  -> {}", e);
         }
     }
 
-    println!("\nNow trying with a valid buffer...");
+    // --- Part 4: Normal user-facing error handling with context()
+    println!("\n--- Normal usage is still clean and ergonomic ---");
 
-    let mut good_buf = Vec::new();
-    let off2 = serialize_value(&mut good_buf, &Value::from("Rustacean"));
+    store.put(Key::from("demo"), Value::from("success"));
+    let val = store
+        .get_owned("demo")
+        .context("expected key 'demo' in store")?;
 
-    let (bv2, _len2) = deserialize_borrowed(&good_buf[off2..])?.expect("valid entry missing");
-
-    println!("[OK] Successfully decoded value: {:?}", bv2);
+    println!("Successfully retrieved owned value: {:?}", val);
 
     println!("\nExample 5 complete.");
     Ok(())
