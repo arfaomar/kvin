@@ -39,9 +39,13 @@ fn main() {
     println!("Unsafe header bytes: {:?}", unsafe_buf);
 
     // Unsafe deserialization back into a struct
-    let parsed = unsafe { deserialize_unsafe(&unsafe_buf) }.unwrap();
+    let parsed = unsafe {
+        deserialize_unsafe(&unsafe_buf)
+            .unwrap() // unwrap Result
+            .expect("no header") // unwrap Option
+    };
 
-    // Copy the packed fields into locals to avoid unaligned references
+    // Copy packed fields to properly-aligned locals
     let total_len = parsed.total_len;
     let checksum = parsed.checksum;
     let tag = parsed.tag;
@@ -58,17 +62,23 @@ fn main() {
     let offset = serialize_value(&mut buf, &Value::from("ChecksumDemo"));
     println!("Serialized one value ({} bytes total)", buf.len() - offset);
 
-    // Corrupt the serialized payload to trigger checksum failure
+    // Corrupt the serialized payload
     if buf.len() > offset + RAW_HEADER_SIZE + 1 {
         buf[offset + RAW_HEADER_SIZE + 1] ^= 0xFF;
     }
 
     println!("Attempting to deserialize corrupted data...");
-    let result = std::panic::catch_unwind(|| deserialize_borrowed(&buf[offset..]));
-    match result {
-        Ok(Some((_v, _))) => println!("Decoded value unexpectedly (checksum passed)"),
-        Ok(None) => println!("Checksum verification failed (None returned)"),
-        Err(_) => println!("Checksum mismatch caused panic as expected"),
+
+    match deserialize_borrowed(&buf[offset..]) {
+        Ok(Some((_v, _))) => {
+            println!("Decoded value unexpectedly (checksum passed)");
+        }
+        Ok(None) => {
+            println!("Not enough data to decode");
+        }
+        Err(e) => {
+            println!("Checksum mismatch detected as error: {}", e);
+        }
     }
 
     println!("\nExample 3 complete.");

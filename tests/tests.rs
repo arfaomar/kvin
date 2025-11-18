@@ -64,21 +64,36 @@ mod tests {
         let original = Value::from("Hello Kvin!");
         let off = serialize_value(&mut buf, &original);
 
-        let (borrowed, _len) = deserialize_borrowed(&buf[off..]).expect("deserialize failed");
+        let (borrowed, _len) = deserialize_borrowed(&buf[off..])
+            .expect("deserialize failed") // unwrap Result
+            .expect("no value decoded"); // unwrap Option
         let decoded = borrowed.to_owned();
 
         assert_eq!(decoded, original);
     }
 
     #[test]
-    #[should_panic(expected = "checksum mismatch")]
     fn test_checksum_detection() {
         let mut buf = Vec::new();
         let off = kvin::serialize_value(&mut buf, &kvin::Value::from("hello"));
-        // corrupt one byte in the body
-        buf[off + kvin::RAW_HEADER_SIZE + 1] ^= 0xFF;
-        // should panic now
-        let _ = kvin::deserialize_borrowed(&buf[off..]);
+
+        buf[off + kvin::RAW_HEADER_SIZE + 1] ^= 0xFF; // corrupt
+
+        let err = kvin::deserialize_borrowed(&buf[off..]).unwrap_err(); // Result Err
+
+        assert!(err.to_string().contains("checksum mismatch"));
+    }
+
+    #[test]
+    fn test_checksum_mismatch_error() {
+        let mut buf = Vec::new();
+        let off = kvin::serialize_value(&mut buf, &kvin::Value::from("hello"));
+
+        buf[off + kvin::RAW_HEADER_SIZE + 1] ^= 0xFF; // corrupt
+
+        let err = kvin::deserialize_borrowed(&buf[off..]).unwrap_err();
+
+        assert!(err.to_string().contains("checksum mismatch"));
     }
 
     #[test]
@@ -97,7 +112,11 @@ mod tests {
         }
 
         assert_eq!(buf.len(), RAW_HEADER_SIZE);
-        let out = unsafe { deserialize_unsafe(&buf).unwrap() };
+        let out = unsafe {
+            deserialize_unsafe(&buf)
+                .unwrap() // unwrap Result
+                .expect("no header decoded") // unwrap Option
+        };
 
         // Copy packed fields safely into locals
 
@@ -112,16 +131,6 @@ mod tests {
         assert_eq!(out_total_len, h_total_len);
         assert_eq!(out_checksum, h_checksum);
         assert_eq!(out_tag, h_tag);
-    }
-
-    #[test]
-    #[should_panic(expected = "checksum mismatch")]
-    fn test_checksum_mismatch_panics() {
-        let mut buf = Vec::new();
-        let off = kvin::serialize_value(&mut buf, &kvin::Value::from("hello"));
-        // corrupt one byte
-        buf[off + kvin::RAW_HEADER_SIZE + 1] ^= 0xFF;
-        let _ = kvin::deserialize_borrowed(&buf[off..]);
     }
 
     #[test]
@@ -170,18 +179,25 @@ mod tests {
         s.put(Key::from("a"), Value::from(1));
         s.put(Key::from(2), Value::from("x"));
 
-        let got: Vec<String> = s.iter()
+        let got: Vec<String> = s
+            .iter()
             .map(|e| format!("{:?}:{:?}", e.key, e.value))
             .collect();
 
         // Don't assume order; just assert both are present
-        assert!(got.iter().any(|l| l.contains("Int(2)") && l.contains("Text(\"x\")")));
-        assert!(got.iter().any(|l| l.contains("Text(\"a\")") && l.contains("Int(1)")));
+        assert!(
+            got.iter()
+                .any(|l| l.contains("Int(2)") && l.contains("Text(\"x\")"))
+        );
+        assert!(
+            got.iter()
+                .any(|l| l.contains("Text(\"a\")") && l.contains("Int(1)"))
+        );
     }
 
     #[test]
     fn keys_and_values_iter() {
-        use kvin::{Kvin, KvStore, Key, Value};
+        use kvin::{Key, KvStore, Kvin, Value};
 
         let mut store = Kvin::new();
         store.put(Key::from("lang"), Value::from("Rust"));
@@ -189,16 +205,10 @@ mod tests {
         store.put(Key::from("safe"), Value::from(true));
 
         // Collect keys and values to Vecs
-        let mut keys: Vec<String> = store
-            .keys()
-            .map(|k| format!("{:?}", k))
-            .collect();
+        let mut keys: Vec<String> = store.keys().map(|k| format!("{:?}", k)).collect();
         keys.sort();
 
-        let mut values: Vec<String> = store
-            .values()
-            .map(|v| format!("{:?}", v))
-            .collect();
+        let mut values: Vec<String> = store.values().map(|v| format!("{:?}", v)).collect();
         values.sort();
 
         // Expected contents — order does not matter
@@ -216,5 +226,4 @@ mod tests {
         assert_eq!(keys, expected_keys);
         assert_eq!(values, expected_values);
     }
-
 }
