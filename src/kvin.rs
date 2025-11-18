@@ -57,7 +57,10 @@ impl<'a> Iterator for StoreIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (key, &off) = self.inner.next()?;
-        let (value, _len) = deserialize_borrowed(&self.buf[off..])?;
+        // Convert Result -> Option and then Option -> actual tuple
+        let maybe = deserialize_borrowed(&self.buf[off..]).ok()??;
+        let (value, _len) = maybe;
+
         Some(BorrowedEntry { key, value })
     }
 }
@@ -117,7 +120,8 @@ impl Kvin {
     /// zero-copy borrowed get method.
     pub fn get_borrowed<'a>(&'a self, key: &Key) -> Option<BorrowedValue<'a>> {
         let off = *self.index.get(key)?;
-        let (bv, _len) = deserialize_borrowed(&self.buf[off..])?;
+        let maybe = deserialize_borrowed(&self.buf[off..]).ok()??;
+        let (bv, _len) = maybe;
         Some(bv)
     }
 
@@ -171,7 +175,8 @@ impl KvStore for Kvin {
     {
         let key = key.into();
         let off = self.index.remove(&key)?;
-        let (bv, _len) = deserialize_borrowed(&self.buf[off..])?;
+        let maybe = deserialize_borrowed(&self.buf[off..]).ok()??;
+        let (bv, _len) = maybe;
         Some(bv.to_owned())
     }
 
