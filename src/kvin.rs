@@ -58,9 +58,7 @@ impl<'a> Iterator for StoreIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let (key, &off) = self.inner.next()?;
         // Convert Result -> Option and then Option -> actual tuple
-        let maybe = deserialize_borrowed(&self.buf[off..]).ok()??;
-        let (value, _len) = maybe;
-
+        let (value, _len) = deserialize_borrowed(&self.buf[off..]).ok()??;
         Some(BorrowedEntry { key, value })
     }
 }
@@ -68,12 +66,16 @@ impl<'a> Iterator for StoreIter<'a> {
 impl<'a> IntoIterator for &'a Kvin {
     type Item = BorrowedEntry<'a>;
     type IntoIter = StoreIter<'a>;
-    fn into_iter(self) -> Self::IntoIter { self.iter() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }
 
 impl<'a> std::iter::FusedIterator for StoreIter<'a> {}
 impl<'a> ExactSizeIterator for StoreIter<'a> {
-    fn len(&self) -> usize { self.inner.len() }
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
 }
 
 /// Trait that defines the Kvin API.
@@ -120,8 +122,7 @@ impl Kvin {
     /// zero-copy borrowed get method.
     pub fn get_borrowed<'a>(&'a self, key: &Key) -> Option<BorrowedValue<'a>> {
         let off = *self.index.get(key)?;
-        let maybe = deserialize_borrowed(&self.buf[off..]).ok()??;
-        let (bv, _len) = maybe;
+        let (bv, _len) = deserialize_borrowed(&self.buf[off..]).ok()??;
         Some(bv)
     }
 
@@ -175,8 +176,7 @@ impl KvStore for Kvin {
     {
         let key = key.into();
         let off = self.index.remove(&key)?;
-        let maybe = deserialize_borrowed(&self.buf[off..]).ok()??;
-        let (bv, _len) = maybe;
+        let (bv, _len) = deserialize_borrowed(&self.buf[off..]).ok()??;
         Some(bv.to_owned())
     }
 
