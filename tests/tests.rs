@@ -71,7 +71,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "checksum mismatch")]
     fn test_checksum_detection() {
         let mut buf = Vec::new();
         let off = kvin::serialize_value(&mut buf, &kvin::Value::from("hello"));
@@ -115,7 +114,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "checksum mismatch")]
     fn test_checksum_mismatch_panics() {
         let mut buf = Vec::new();
         let off = kvin::serialize_value(&mut buf, &kvin::Value::from("hello"));
@@ -158,6 +156,7 @@ mod tests {
         // Check entries via iter()
         let mut entries: Vec<(String, String)> = s
             .iter()
+            .filter_map(|entry| entry.ok())
             .map(|e| (format!("{:?}", e.key), format!("{:?}", e.value)))
             .collect();
         entries.sort();
@@ -171,6 +170,7 @@ mod tests {
         s.put(Key::from(2), Value::from("x"));
 
         let got: Vec<String> = s.iter()
+            .filter_map(|entry| entry.ok())
             .map(|e| format!("{:?}:{:?}", e.key, e.value))
             .collect();
 

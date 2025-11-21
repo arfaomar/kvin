@@ -1,7 +1,4 @@
-use kvin::{
-    Key, KvStore, Kvin, RAW_HEADER_SIZE, RawHeader, Value, deserialize_borrowed,
-    deserialize_unsafe, serialize_unsafe, serialize_value,
-};
+use kvin::{Key, KvStore, Kvin, RAW_HEADER_SIZE, RawHeader, Value, deserialize_borrowed, deserialize_unsafe, serialize_unsafe, serialize_value, KvinError};
 
 fn main() {
     println!("=== Example 3: Unsafe Serialization & Checksum Demo ===\n");
@@ -63,12 +60,14 @@ fn main() {
         buf[offset + RAW_HEADER_SIZE + 1] ^= 0xFF;
     }
 
-    println!("Attempting to deserialize corrupted data...");
-    let result = std::panic::catch_unwind(|| deserialize_borrowed(&buf[offset..]));
-    match result {
-        Ok(Some((_v, _))) => println!("Decoded value unexpectedly (checksum passed)"),
-        Ok(None) => println!("Checksum verification failed (None returned)"),
-        Err(_) => println!("Checksum mismatch caused panic as expected"),
+
+    match deserialize_borrowed(&buf[offset..]) {
+        Ok((val, size)) =>
+            println!("Decoded value unexpectedly (checksum passed) {:?} ({} Bytes)", val, size),
+        Err(KvinError::ChecksumMismatch) => {
+            println!("Checksum mismatch detected during deserialization.");
+        }
+        Err(e) => println!("Other error: {}", e),
     }
 
     println!("\nExample 3 complete.");

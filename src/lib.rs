@@ -9,4 +9,4 @@ pub use crate::serialization::{
     serialize_value,
 };
 
-pub use crate::error::Result;
+pub use crate::error::{Result, KvinError};
