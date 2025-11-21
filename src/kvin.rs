@@ -1,6 +1,7 @@
 use crate::{deserialize_borrowed, serialize_value};
 use std::borrow::ToOwned;
 use std::collections::HashMap;
+use crate::error::{KvinError, Result};
 
 /// Represents possible key types.
 /// Must implement Eq + Hash for use in HashMap.
@@ -53,17 +54,18 @@ pub struct StoreIter<'a> {
 }
 
 impl<'a> Iterator for StoreIter<'a> {
-    type Item = BorrowedEntry<'a>;
+    type Item = Result<BorrowedEntry<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let (key, &off) = self.inner.next()?;
-        let (value, _len) = deserialize_borrowed(&self.buf[off..])?;
-        Some(BorrowedEntry { key, value })
+        let result = deserialize_borrowed(&self.buf[off..])
+            .map(|(value, _)| BorrowedEntry { key, value });
+        Some(result)
     }
 }
 
 impl<'a> IntoIterator for &'a Kvin {
-    type Item = BorrowedEntry<'a>;
+    type Item = Result<BorrowedEntry<'a>>;
     type IntoIter = StoreIter<'a>;
     fn into_iter(self) -> Self::IntoIter { self.iter() }
 }
@@ -101,7 +103,7 @@ pub trait KvStore {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Kvin {
     /// Append-only bytes (our “log”).
-    buf: Vec<u8>,
+    pub buf: Vec<u8>, // TODO: FOR SHOWCASE - make private later
     /// Maps a key to the start offset of its most recent serialized value in `buf`.
     index: HashMap<Key, usize>,
 }
@@ -115,10 +117,10 @@ impl Kvin {
         }
     }
     /// zero-copy borrowed get method.
-    pub fn get_borrowed<'a>(&'a self, key: &Key) -> Option<BorrowedValue<'a>> {
-        let off = *self.index.get(key)?;
+    pub fn get_borrowed<'a>(&'a self, key: &Key) -> Result<BorrowedValue<'a>> {
+        let off = *self.index.get(key).ok_or(KvinError::MalformedEntry)?;
         let (bv, _len) = deserialize_borrowed(&self.buf[off..])?;
-        Some(bv)
+        Ok(bv)
     }
 
     pub fn iter(&self) -> StoreIter<'_> {
@@ -129,11 +131,11 @@ impl Kvin {
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &Key> {
-        self.iter().map(|e| e.key)
+        self.iter().filter_map(|entry| entry.ok().map(|e| e.key))
     }
 
     pub fn values(&self) -> impl Iterator<Item = BorrowedValue<'_>> {
-        self.iter().map(|e| e.value)
+        self.iter().filter_map(|entry| entry.ok().map(|e| e.value))
     }
 }
 
@@ -162,7 +164,7 @@ impl KvStore for Kvin {
         K: Into<Key>,
     {
         let key = key.into();
-        self.get_borrowed(&key)
+        self.get_borrowed(&key).ok()
     }
 
     fn delete<K>(&mut self, key: K) -> Option<Value>
@@ -171,7 +173,7 @@ impl KvStore for Kvin {
     {
         let key = key.into();
         let off = self.index.remove(&key)?;
-        let (bv, _len) = deserialize_borrowed(&self.buf[off..])?;
+        let (bv, _len) = deserialize_borrowed(&self.buf[off..]).ok()?;
         Some(bv.to_owned())
     }
 
@@ -180,7 +182,7 @@ impl KvStore for Kvin {
         K: Into<Key>,
     {
         let key = key.into();
-        self.get_borrowed(&key).map(|bv| bv.to_owned())
+        self.get_borrowed(&key).map(|bv| bv.to_owned()).ok()
     }
 }
 

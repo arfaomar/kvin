@@ -1,5 +1,6 @@
 use crate::{BorrowedValue, Value};
 use crc::{CRC_32_ISO_HDLC, Crc};
+use crate::error::{KvinError, Result};
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
@@ -149,62 +150,64 @@ pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
 
 /// Returns (BorrowedValue, full_entry_size_including_header)
 /// todo: better error handling (Result type instead of option (LAB6)?
-pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Option<(BorrowedValue<'a>, usize)> {
+pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Result<(BorrowedValue<'a>, usize)> {
     // Need header first
     if src.len() < RAW_HEADER_SIZE {
-        return None;
+        return Err(KvinError::MalformedEntry); // incomplete entry
     }
 
     // SAFETY: `src` is validated to be at least `RAW_HEADER_SIZE` bytes above,
     // so deserializing a `RawHeader` from it is safe.
-    let header = unsafe { deserialize_unsafe(src)? };
+    let header = unsafe { deserialize_unsafe(src) }
+        .ok_or(KvinError::MalformedEntry)?;
 
     let body_len = header.total_len as usize;
     let full_size = RAW_HEADER_SIZE + body_len;
 
     if src.len() < full_size {
-        return None; // incomplete entry
+        return Err(KvinError::MalformedEntry); // incomplete entry
     }
 
     let body = &src[RAW_HEADER_SIZE..full_size];
 
     // 2) Verify checksum before parsing
     if crc32(body) != header.checksum {
-        panic!("checksum mismatch in entry body");
+        return Err(KvinError::ChecksumMismatch);
     }
 
     // 3) Decode by tag from header, parsing the Body only
     match header.tag {
         TAG_INT => {
             if body.len() < 8 {
-                return None;
+                return Err(KvinError::MalformedEntry);
             }
             let i = read_i64_le(&body[..8]);
-            Some((BorrowedValue::Int(i), full_size))
+            Ok((BorrowedValue::Int(i), full_size))
         }
         TAG_BOOL => {
             if body.is_empty() {
-                return None;
+                return Err(KvinError::MalformedEntry);
             }
-            Some((BorrowedValue::Bool(body[0] != 0), full_size))
+            Ok((BorrowedValue::Bool(body[0] != 0), full_size))
         }
         TAG_TEXT | TAG_BLOB => {
             if body.len() < 8 {
-                return None;
+                return Err(KvinError::MalformedEntry);
             }
             let n = read_u64_le(&body[..8]) as usize;
             if body.len() < 8 + n {
-                return None;
+                return Err(KvinError::MalformedEntry);
             }
             let bytes = &body[8..8 + n];
             if header.tag == TAG_TEXT {
-                let s = std::str::from_utf8(bytes).ok()?;
-                Some((BorrowedValue::Text(s), full_size))
+                let s = std::str::from_utf8(bytes)
+                    .map_err(|_| KvinError::InvalidUtf8)?;
+                Ok((BorrowedValue::Text(s), full_size))
             } else {
-                Some((BorrowedValue::Blob(bytes), full_size))
+                Ok((BorrowedValue::Blob(bytes), full_size))
             }
         }
-        _ => None,
+        _ => Err(KvinError::UnknownTag(header.tag)),
     }
 }
 

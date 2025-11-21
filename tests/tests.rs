@@ -25,7 +25,7 @@ mod tests {
         // get_borrowed() directly (same as get)
         assert_eq!(
             store.get_borrowed(&Key::from("language")),
-            Some(BorrowedValue::Text("Rust"))
+            Ok(BorrowedValue::Text("Rust"))
         );
     }
 

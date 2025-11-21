@@ -14,7 +14,10 @@ fn main() {
     // --- Part 2: Iterate over entries (key + value)
     println!("--- Iterating over entries with `iter()` ---");
     for entry in store.iter() {
-        println!("  {:?} => {:?}", entry.key, entry.value);
+        match entry {
+            Ok(e) => println!("  OK: {:?} => {:?}", e.key, e.value),
+            Err(err) => println!("  ERROR: {}", err),
+        }
     }
 
     // --- Part 3: Iterate over keys
