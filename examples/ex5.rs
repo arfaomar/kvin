@@ -1,59 +1,35 @@
-use anyhow::{Context, Result};
-use kvin::{Key, KvStore, Kvin, Value};
-
+use kvin::{Kvin, KvStore, Key, Value, Result, Context};
 fn main() -> Result<()> {
-    println!("=== Example 5: Error Handling with anyhow (User Perspective) ===\n");
+    println!("=== Example 5: High-level error handling with anyhow ===");
 
-    // --- Part 1: Basic usage (no errors expected)
     let mut store = Kvin::new();
-    store.put(Key::from("lang"), Value::from("Rust"));
-    store.put(Key::from("year"), Value::from(2025_i64));
-    store.put(Key::from("safe"), Value::from(true));
 
-    println!("Stored a few values safely.");
-    println!("  get(lang) -> {:?}", store.get("lang"));
-    println!("  get(year) -> {:?}", store.get("year"));
-    println!("  get(safe) -> {:?}", store.get("safe"));
+    store
+        .put(Key::from("user"), Value::from("Omar"))
+        .context("failed to insert key 'user'")?;
 
-    // --- Part 2: Demonstrate that normal usage never returns Result
-    println!("\n--- Normal Kvin usage does NOT expose Result ---");
-    println!("Users only see `Option<T>`:");
-    println!("  get(nonexistent) -> {:?}", store.get("does_not_exist"));
+    store
+        .put(Key::from("age"), Value::from(21_i64))
+        .context("failed to insert key 'age'")?;
 
-    // --- Part 3: Show anyhow-style error handling by manually corrupting data
-    println!("\n--- Introducing corruption to demonstrate anyhow error ---");
+    // Demonstrate normal lookup
+    let user = store.get("user")?.context("missing key 'user'")?;
+    println!("user => {:?}", user);
 
-    // We serialize a clean value manually (users normally do not do this)
-    let mut buf = Vec::new();
-    let off = kvin::serialize_value(&mut buf, &Value::from("CorruptMe"));
+    // Show enriched error handling behavior
+    println!("\nTrying to update non-existing key…");
 
-    // Corrupt one byte after the header
-    let header_size = kvin::RAW_HEADER_SIZE;
-    buf[off + header_size + 1] ^= 0xFF;
-
-    println!("Corrupted a serialized entry intentionally.");
-
-    println!("\nAttempting to decode corrupted data...");
-
-    match kvin::deserialize_borrowed(&buf[off..]) {
-        Ok((val, _len)) => {
-            println!("Decoded value: {:?}", val);
-        }
-        Err(e) => {
-            println!("Error decoding value: {}", e);
-        }
+    if let Err(e) = store.update(&Key::from("missing"), Value::from("oops")) {
+        println!("update error: {}", e);
     }
 
-    // --- Part 4: Normal user-facing error handling with context()
-    println!("\n--- Normal usage is still clean and ergonomic ---");
+    // Delete with context
+    let deleted = store
+        .delete("age")
+        .context("delete should never fail structurally")?;
 
-    store.put(Key::from("demo"), Value::from("success"));
-    let val = store
-        .get_owned("demo")
-        .context("expected key 'demo' in store")?;
+    println!("deleted => {:?}", deleted);
 
-    println!("Successfully retrieved owned value: {:?}", val);
-
-    println!("\nExample 5 complete.");
+    println!("\nExample 5 complete.\n");
     Ok(())
 }

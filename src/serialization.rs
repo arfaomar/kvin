@@ -1,5 +1,4 @@
-use crate::{BorrowedValue, Value};
-use anyhow::anyhow;
+use crate::{BorrowedValue, Result, Value, anyhow};
 use crc::{CRC_32_ISO_HDLC, Crc};
 
 #[repr(C, packed)]
@@ -87,7 +86,7 @@ pub unsafe fn serialize_unsafe(buf: &mut Vec<u8>, header: &RawHeader) -> usize {
 /// SAFETY:
 /// The caller must ensure that `src` points to at least `RAW_HEADER_SIZE` readable bytes.
 /// This function reads a `RawHeader` directly from the slice without alignment checks.
-pub unsafe fn deserialize_unsafe(src: &[u8]) -> anyhow::Result<RawHeader> {
+pub unsafe fn deserialize_unsafe(src: &[u8]) -> Result<RawHeader> {
     unsafe {
         if src.len() < RAW_HEADER_SIZE {
             return Err(anyhow!(
@@ -157,7 +156,7 @@ pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
 }
 
 /// Returns (BorrowedValue, full_entry_size_including_header)
-pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> anyhow::Result<(BorrowedValue<'a>, usize)> {
+pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Result<(BorrowedValue<'a>, usize)> {
     // Need header first
     if src.len() < RAW_HEADER_SIZE {
         return Err(anyhow!(

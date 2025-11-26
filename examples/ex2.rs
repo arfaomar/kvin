@@ -1,34 +1,34 @@
-use kvin::{Key, KvStore, Kvin, Value};
+use kvin::{Kvin, KvStore, Key, Value, Result};
 
-fn main() {
+fn main() -> Result<()> {
+    println!("=== Example 2: Borrowed vs Owned Values ===");
+
     let mut store = Kvin::new();
 
-    // Insert values
-    store.put(Key::from("language"), Value::from("Rust"));
-    store.put(Key::from(1), Value::from(true));
+    store.put(Key::from("name"), Value::from("Kvin"))?;
+    store.put(Key::from("count"), Value::from(123_i64))?;
 
-    // Attempt to overwrite existing key should fail
-    assert!(!store.put(Key::from("language"), Value::from("Go")));
+    // Borrowed access
+    if let Some(b) = store.get("name")? {
+        println!("borrowed name: {:?}", b);
+    }
 
-    // get() now returns BorrowedValue
-    println!("{:?}", store.get("language")); // Some(BorrowedValue::Text("Rust"))
-    println!("{:?}", store.get(1)); // Some(BorrowedValue::Bool(true))
+    // Owned access
+    if let Some(v) = store.get_owned("name")? {
+        println!("owned name: {:?}", v);
+    }
 
-    // get_owned() returns Value
-    println!("{:?}", store.get_owned("language")); // Some(Value::Text("Rust"))
-    println!("{:?}", store.get_owned(1)); // Some(Value::Bool(true))
+    println!("\nUpdating the name key…");
+    store.update(&Key::from("name"), Value::from("Updated"))?;
 
-    // get_borrowed() is same as get()
-    println!("{:?}", store.get_borrowed(&Key::from("language"))); // Some(BorrowedValue::Text("Rust"))
+    if let Some(b) = store.get("name")? {
+        println!("borrowed after update: {:?}", b);
+    }
 
-    // Update existing key
-    store.update(&Key::from("language"), Value::from("C++"));
-    println!("{:?}", store.get("language")); // Some(BorrowedValue::Text("C++"))
+    if let Some(v) = store.get_owned("name")? {
+        println!("owned after update: {:?}", v);
+    }
 
-    // Delete a key
-    let deleted = store.delete(1);
-    println!("{:?}", deleted); // Some(Value::Bool(true))
-
-    // After delete
-    println!("{:?}", store.get(1)); // None
+    println!("Example 2 complete.\n");
+    Ok(())
 }

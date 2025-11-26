@@ -8,20 +8,24 @@ mod tests {
     #[test]
     fn test_put_and_get() {
         let mut store = Kvin::new();
-        assert!(store.put(Key::from("language"), Value::from("Rust")));
-        assert!(store.put(Key::from(1), Value::from(true)));
+
+        // put() now returns Result<()>
+        store
+            .put(Key::from("language"), Value::from("Rust"))
+            .unwrap();
+        store.put(Key::from(1), Value::from(true)).unwrap();
 
         // Attempt to overwrite existing key should fail
-        assert!(!store.put(Key::from("language"), Value::from("Go")));
+        assert!(store.put(Key::from("language"), Value::from("Go")).is_err());
 
-        // get() now returns Result<Option<_>>
+        // get()
         assert_eq!(
             store.get("language").unwrap(),
             Some(BorrowedValue::Text("Rust"))
         );
         assert_eq!(store.get(1).unwrap(), Some(BorrowedValue::Bool(true)));
 
-        // get_owned() explicitly clones into Value
+        // get_owned()
         assert_eq!(
             store.get_owned("language").unwrap(),
             Some(Value::Text("Rust".into()))
@@ -38,8 +42,11 @@ mod tests {
     #[test]
     fn test_update_existing() {
         let mut store = Kvin::new();
-        assert!(store.put(Key::from(42), Value::from("life")));
-        assert!(store.update(&Key::from(42), Value::from("universe")));
+
+        store.put(Key::from(42), Value::from("life")).unwrap();
+        store
+            .update(&Key::from(42), Value::from("universe"))
+            .unwrap();
 
         assert_eq!(
             store.get(42).unwrap(),
@@ -54,13 +61,19 @@ mod tests {
     #[test]
     fn test_update_non_existing() {
         let mut store = Kvin::new();
-        assert!(!store.update(&Key::from(999), Value::from("nothing")));
+        // previously returned false, now returns Err
+        assert!(
+            store
+                .update(&Key::from(999), Value::from("nothing"))
+                .is_err()
+        );
     }
 
     #[test]
     fn test_delete() {
         let mut store = Kvin::new();
-        assert!(store.put(Key::from("remove"), Value::from(123)));
+
+        store.put(Key::from("remove"), Value::from(123)).unwrap();
 
         assert_eq!(store.delete("remove").unwrap(), Some(Value::Int(123)));
 
@@ -126,9 +139,10 @@ mod tests {
     #[test]
     fn test_iter_keys_values() {
         let mut s = Kvin::new();
-        s.put(Key::from("a"), Value::from(1));
-        s.put(Key::from("b"), Value::from(true));
-        s.put(Key::from(3), Value::from("x"));
+
+        s.put(Key::from("a"), Value::from(1)).unwrap();
+        s.put(Key::from("b"), Value::from(true)).unwrap();
+        s.put(Key::from(3), Value::from("x")).unwrap();
 
         let mut ks: Vec<String> = s.keys().map(|k| format!("{:?}", k.unwrap())).collect();
         ks.sort();
@@ -137,7 +151,7 @@ mod tests {
             vec![
                 "Int(3)".to_string(),
                 "Text(\"a\")".to_string(),
-                "Text(\"b\")".to_string(),
+                "Text(\"b\")".to_string()
             ]
         );
 
@@ -148,7 +162,7 @@ mod tests {
             vec![
                 "Bool(true)".to_string(),
                 "Int(1)".to_string(),
-                "Text(\"x\")".to_string(),
+                "Text(\"x\")".to_string()
             ]
         );
 
@@ -159,7 +173,6 @@ mod tests {
                 (format!("{:?}", e.key), format!("{:?}", e.value))
             })
             .collect();
-
         entries.sort();
         assert_eq!(entries.len(), 3);
     }
@@ -167,8 +180,9 @@ mod tests {
     #[test]
     fn iter_entries_zero_copy() {
         let mut s = Kvin::new();
-        s.put(Key::from("a"), Value::from(1));
-        s.put(Key::from(2), Value::from("x"));
+
+        s.put(Key::from("a"), Value::from(1)).unwrap();
+        s.put(Key::from(2), Value::from("x")).unwrap();
 
         let got: Vec<String> = s
             .iter()
@@ -191,9 +205,10 @@ mod tests {
     #[test]
     fn keys_and_values_iter() {
         let mut store = Kvin::new();
-        store.put(Key::from("lang"), Value::from("Rust"));
-        store.put(Key::from("ver"), Value::from(2025_i64));
-        store.put(Key::from("safe"), Value::from(true));
+
+        store.put(Key::from("lang"), Value::from("Rust")).unwrap();
+        store.put(Key::from("ver"), Value::from(2025_i64)).unwrap();
+        store.put(Key::from("safe"), Value::from(true)).unwrap();
 
         let mut keys: Vec<String> = store.keys().map(|k| format!("{:?}", k.unwrap())).collect();
         keys.sort();

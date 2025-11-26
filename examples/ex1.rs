@@ -1,31 +1,34 @@
-use kvin::{Key, KvStore, Kvin, Value};
+use kvin::{Kvin, KvStore, Key, Value, Result};
 
-fn main() {
+fn main() -> Result<()> {
+    println!("=== Example 1: Basic Put/Get/Update/Delete ===");
+
     let mut store = Kvin::new();
 
-    println!(
-        "put name: {}",
-        store.put(Key::from("name"), Value::from("Kvin"))
-    );
-    println!("put int: {}", store.put(Key::from(1), Value::from(404)));
-    println!(
-        "put bool: {}",
-        store.put(Key::from(true), Value::from("mem safe"))
-    );
+    // Insert values
+    store.put(Key::from("language"), Value::from("Rust"))?;
+    store.put(Key::from("year"), Value::from(2025_i64))?;
 
-    println!(
-        "put name again: {}",
-        store.put(Key::from("name"), Value::from("Kvin v3"))
-    );
-    println!("name after failed put: {:?}", store.get("name"));
+    // Read borrowed values
+    if let Some(v) = store.get("language")? {
+        println!("get(language) => {:?}", v);
+    }
 
-    println!("int key -> {:?}", store.get(1));
+    // Update existing key
+    store.update(&Key::from("language"), Value::from("Rustacean"))?;
 
-    store.update(&Key::from("name"), Value::from("Kvin v2"));
-    println!("updated name -> {:?}", store.get("name"));
+    if let Some(v) = store.get("language")? {
+        println!("after update => {:?}", v);
+    }
 
-    let _ = store.delete(1);
-    println!("after delete -> {:?}", store.get(1));
+    // Delete key
+    if let Some(v) = store.delete("year")? {
+        println!("deleted(year) => {:?}", v);
+    }
 
-    println!("\nFinal store: {:#?}", store);
+    // Attempt to read deleted key
+    println!("get(year) => {:?}", store.get("year")?);
+
+    println!("Example 1 complete.\n");
+    Ok(())
 }
