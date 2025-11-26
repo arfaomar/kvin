@@ -2,17 +2,28 @@ use thiserror::Error;
 
 #[derive(Error, Debug, Clone, PartialEq)]
 pub enum KvinError {
+    #[error("Key already exists")]
+    KeyExists,
+
+    #[error("Key not found")]
+    KeyNotFound,
 
     #[error("Checksum mismatch")]
     ChecksumMismatch,
 
-    #[error("Text value is not valid UTF-8")]
+    #[error("Invalid UTF-8 in text value")]
     InvalidUtf8,
 
     #[error("Unknown value tag: {0}")]
     UnknownTag(u8),
 
-    #[error("Incomplete or malformed entry in buffer")]
+    #[error("Invalid or incomplete header")]
+    InvalidHeader,
+
+    #[error("Entry body is incomplete")]
+    IncompleteBody,
+
+    #[error("Malformed or corrupted entry")]
     MalformedEntry,
 }
 

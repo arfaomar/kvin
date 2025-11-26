@@ -1,6 +1,6 @@
+mod error;
 pub mod kvin;
 mod serialization;
-mod error;
 
 pub use kvin::{BorrowedEntry, BorrowedValue, Key, KvStore, Kvin, StoreIter, Value};
 
@@ -9,4 +9,4 @@ pub use crate::serialization::{
     serialize_value,
 };
 
-pub use crate::error::{Result, KvinError};
+pub use crate::error::{KvinError, Result};

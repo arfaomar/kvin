@@ -1,34 +1,21 @@
-use kvin::{Key, KvStore, Kvin, Value};
+use kvin::{Key, KvStore, Kvin, Result, Value};
 
-fn main() {
+fn main() -> Result<()> {
+    println!("=== Example 2: Borrowed vs Owned ===");
+
     let mut store = Kvin::new();
+    store.put(Key::from("msg"), Value::from("Hello"))?;
 
-    // Insert values
-    store.put(Key::from("language"), Value::from("Rust"));
-    store.put(Key::from(1), Value::from(true));
+    // Borrowed value (zero-copy)
+    if let Some(b) = store.get("msg")? {
+        println!("borrowed: {:?}", b);
+    }
 
-    // Attempt to overwrite existing key should fail
-    assert!(!store.put(Key::from("language"), Value::from("Go")));
+    // Owned copy
+    if let Some(o) = store.get_owned("msg")? {
+        println!("owned: {:?}", o);
+    }
 
-    // get() now returns BorrowedValue
-    println!("{:?}", store.get("language")); // Some(BorrowedValue::Text("Rust"))
-    println!("{:?}", store.get(1)); // Some(BorrowedValue::Bool(true))
-
-    // get_owned() returns Value
-    println!("{:?}", store.get_owned("language")); // Some(Value::Text("Rust"))
-    println!("{:?}", store.get_owned(1)); // Some(Value::Bool(true))
-
-    // get_borrowed() is same as get()
-    println!("{:?}", store.get_borrowed(&Key::from("language"))); // Some(BorrowedValue::Text("Rust"))
-
-    // Update existing key
-    store.update(&Key::from("language"), Value::from("C++"));
-    println!("{:?}", store.get("language")); // Some(BorrowedValue::Text("C++"))
-
-    // Delete a key
-    let deleted = store.delete(1);
-    println!("{:?}", deleted); // Some(Value::Bool(true))
-
-    // After delete
-    println!("{:?}", store.get(1)); // None
+    println!("Example 2 complete.\n");
+    Ok(())
 }

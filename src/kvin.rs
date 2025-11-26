@@ -1,7 +1,6 @@
-use crate::{deserialize_borrowed, serialize_value};
+use crate::{deserialize_borrowed, error::KvinError, error::Result, serialize_value};
 use std::borrow::ToOwned;
 use std::collections::HashMap;
-use crate::error::{KvinError, Result};
 
 /// Represents possible key types.
 /// Must implement Eq + Hash for use in HashMap.
@@ -58,43 +57,43 @@ impl<'a> Iterator for StoreIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (key, &off) = self.inner.next()?;
-        let result = deserialize_borrowed(&self.buf[off..])
-            .map(|(value, _)| BorrowedEntry { key, value });
-        Some(result)
+        match deserialize_borrowed(&self.buf[off..]) {
+            Ok((value, _)) => Some(Ok(BorrowedEntry { key, value })),
+            Err(e) => Some(Err(e)),
+        }
     }
 }
 
 impl<'a> IntoIterator for &'a Kvin {
     type Item = Result<BorrowedEntry<'a>>;
     type IntoIter = StoreIter<'a>;
-    fn into_iter(self) -> Self::IntoIter { self.iter() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }
 
 impl<'a> std::iter::FusedIterator for StoreIter<'a> {}
-impl<'a> ExactSizeIterator for StoreIter<'a> {
-    fn len(&self) -> usize { self.inner.len() }
-}
 
 /// Trait that defines the Kvin API.
 pub trait KvStore {
     /// Insert a key-value pair.
-    fn put(&mut self, key: Key, value: Value) -> bool;
+    fn put(&mut self, key: Key, value: Value) -> Result<()>;
 
     /// Update the value for an existing key.
-    fn update(&mut self, key: &Key, new_value: Value) -> bool;
+    fn update(&mut self, key: &Key, new_value: Value) -> Result<()>;
 
     /// Return a zero-copy value by key.
-    fn get<K>(&self, key: K) -> Option<BorrowedValue<'_>>
+    fn get<K>(&self, key: K) -> Result<Option<BorrowedValue<'_>>>
     where
         K: Into<Key>;
 
     /// Delete a key and return its value if it existed.
-    fn delete<K>(&mut self, key: K) -> Option<Value>
+    fn delete<K>(&mut self, key: K) -> Result<Option<Value>>
     where
         K: Into<Key>;
 
     /// Return an owned copy of a value by key.
-    fn get_owned<K>(&self, key: K) -> Option<Value>
+    fn get_owned<K>(&self, key: K) -> Result<Option<Value>>
     where
         K: Into<Key>;
 }
@@ -117,10 +116,14 @@ impl Kvin {
         }
     }
     /// zero-copy borrowed get method.
-    pub fn get_borrowed<'a>(&'a self, key: &Key) -> Result<BorrowedValue<'a>> {
-        let off = *self.index.get(key).ok_or(KvinError::MalformedEntry)?;
-        let (bv, _len) = deserialize_borrowed(&self.buf[off..])?;
-        Ok(bv)
+    pub fn get_borrowed<'a>(&'a self, key: &Key) -> Result<Option<BorrowedValue<'a>>> {
+        let off = match self.index.get(key) {
+            None => return Ok(None),
+            Some(&off) => off,
+        };
+
+        let (bv, _) = deserialize_borrowed(&self.buf[off..])?;
+        Ok(Some(bv))
     }
 
     pub fn iter(&self) -> StoreIter<'_> {
@@ -130,59 +133,63 @@ impl Kvin {
         }
     }
 
-    pub fn keys(&self) -> impl Iterator<Item = &Key> {
-        self.iter().filter_map(|entry| entry.ok().map(|e| e.key))
+    pub fn keys<'a>(&'a self) -> impl Iterator<Item = Result<&'a Key>> + 'a {
+        self.iter().map(|res| res.map(|e| e.key))
     }
 
-    pub fn values(&self) -> impl Iterator<Item = BorrowedValue<'_>> {
-        self.iter().filter_map(|entry| entry.ok().map(|e| e.value))
+    pub fn values<'a>(&'a self) -> impl Iterator<Item = Result<BorrowedValue<'a>>> + 'a {
+        self.iter().map(|res| res.map(|e| e.value))
     }
 }
 
 impl KvStore for Kvin {
-    fn put(&mut self, key: Key, value: Value) -> bool {
+    fn put(&mut self, key: Key, value: Value) -> Result<()> {
         if self.index.contains_key(&key) {
-            // do not overwrite existing key (test expects false)
-            return false;
+            return Err(KvinError::KeyExists);
         }
         let off = serialize_value(&mut self.buf, &value);
         self.index.insert(key, off);
-        true
+        Ok(())
     }
 
-    fn update(&mut self, key: &Key, new_value: Value) -> bool {
+    fn update(&mut self, key: &Key, new_value: Value) -> Result<()> {
         if !self.index.contains_key(key) {
-            return false;
+            return Err(KvinError::KeyNotFound);
         }
         let off = serialize_value(&mut self.buf, &new_value);
         self.index.insert(key.clone(), off);
-        true
+        Ok(())
     }
 
-    fn get<K>(&self, key: K) -> Option<BorrowedValue<'_>>
+    fn get<K>(&self, key: K) -> Result<Option<BorrowedValue<'_>>>
+    where
+        K: Into<Key>,
+    {
+        self.get_borrowed(&key.into())
+    }
+
+    fn delete<K>(&mut self, key: K) -> Result<Option<Value>>
     where
         K: Into<Key>,
     {
         let key = key.into();
-        self.get_borrowed(&key).ok()
+        let off = match self.index.remove(&key) {
+            None => return Ok(None),
+            Some(off) => off,
+        };
+
+        let (bv, _) = deserialize_borrowed(&self.buf[off..])?;
+        Ok(Some(bv.to_owned()))
     }
 
-    fn delete<K>(&mut self, key: K) -> Option<Value>
+    fn get_owned<K>(&self, key: K) -> Result<Option<Value>>
     where
         K: Into<Key>,
     {
-        let key = key.into();
-        let off = self.index.remove(&key)?;
-        let (bv, _len) = deserialize_borrowed(&self.buf[off..]).ok()?;
-        Some(bv.to_owned())
-    }
-
-    fn get_owned<K>(&self, key: K) -> Option<Value>
-    where
-        K: Into<Key>,
-    {
-        let key = key.into();
-        self.get_borrowed(&key).map(|bv| bv.to_owned()).ok()
+        match self.get_borrowed(&key.into())? {
+            None => Ok(None),
+            Some(bv) => Ok(Some(bv.to_owned())),
+        }
     }
 }
 

@@ -1,6 +1,5 @@
-use crate::{BorrowedValue, Value};
+use crate::{BorrowedValue, Value, error::KvinError, error::Result};
 use crc::{CRC_32_ISO_HDLC, Crc};
-use crate::error::{KvinError, Result};
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
@@ -87,11 +86,15 @@ pub unsafe fn serialize_unsafe(buf: &mut Vec<u8>, header: &RawHeader) -> usize {
 /// SAFETY:
 /// The caller must ensure that `src` points to at least `RAW_HEADER_SIZE` readable bytes.
 /// This function reads a `RawHeader` directly from the slice without alignment checks.
-pub unsafe fn deserialize_unsafe(src: &[u8]) -> Option<RawHeader> {
-    if src.len() < RAW_HEADER_SIZE {
-        return None;
+pub unsafe fn deserialize_unsafe(src: &[u8]) -> Result<RawHeader> {
+    unsafe {
+        if src.len() < RAW_HEADER_SIZE {
+            return Err(KvinError::InvalidHeader);
+        }
+        // SAFETY: caller promises `src` has at least RAW_HEADER_SIZE bytes
+        let header = read_header_unchecked(src.as_ptr());
+        Ok(header)
     }
-    Some(unsafe { read_header_unchecked(src.as_ptr()) })
 }
 
 /// Serialize a `Value` into `buf`, returning the starting offset of the serialized entry.
@@ -153,19 +156,18 @@ pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
 pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Result<(BorrowedValue<'a>, usize)> {
     // Need header first
     if src.len() < RAW_HEADER_SIZE {
-        return Err(KvinError::MalformedEntry); // incomplete entry
+        return Err(KvinError::InvalidHeader); // incomplete entry
     }
 
     // SAFETY: `src` is validated to be at least `RAW_HEADER_SIZE` bytes above,
     // so deserializing a `RawHeader` from it is safe.
-    let header = unsafe { deserialize_unsafe(src) }
-        .ok_or(KvinError::MalformedEntry)?;
+    let header = unsafe { deserialize_unsafe(src)? };
 
     let body_len = header.total_len as usize;
     let full_size = RAW_HEADER_SIZE + body_len;
 
     if src.len() < full_size {
-        return Err(KvinError::MalformedEntry); // incomplete entry
+        return Err(KvinError::IncompleteBody); // incomplete entry
     }
 
     let body = &src[RAW_HEADER_SIZE..full_size];
@@ -196,12 +198,11 @@ pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Result<(BorrowedValue<'a>, usi
             }
             let n = read_u64_le(&body[..8]) as usize;
             if body.len() < 8 + n {
-                return Err(KvinError::MalformedEntry);
+                return Err(KvinError::IncompleteBody);
             }
             let bytes = &body[8..8 + n];
             if header.tag == TAG_TEXT {
-                let s = std::str::from_utf8(bytes)
-                    .map_err(|_| KvinError::InvalidUtf8)?;
+                let s = std::str::from_utf8(bytes).map_err(|_| KvinError::InvalidUtf8)?;
                 Ok((BorrowedValue::Text(s), full_size))
             } else {
                 Ok((BorrowedValue::Blob(bytes), full_size))
