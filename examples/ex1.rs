@@ -24,7 +24,7 @@ fn main() {
     store.update(&Key::from("name"), Value::from("Kvin v2"));
     println!("updated name -> {:?}", store.get("name"));
 
-    store.delete(1);
+    let _ = store.delete(1);
     println!("after delete -> {:?}", store.get(1));
 
     println!("\nFinal store: {:#?}", store);

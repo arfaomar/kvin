@@ -6,16 +6,14 @@ use kvin::{
 fn main() {
     println!("=== Example 3: Unsafe Serialization & Checksum Demo ===\n");
 
-    // --- Part 1: Normal store usage (safe)
     let mut store = Kvin::new();
     store.put(Key::from("language"), Value::from("Rust"));
     store.put(Key::from(1), Value::from(true));
 
     println!("Stored values:");
-    println!("  get(language)  -> {:?}", store.get("language"));
-    println!("  get_owned(1)   -> {:?}", store.get_owned(1));
+    println!("  get(language)  -> {:?}", store.get("language").unwrap());
+    println!("  get_owned(1)   -> {:?}", store.get_owned(1).unwrap());
 
-    // --- Part 2: Demonstrate unsafe RawHeader serialization
     println!("\n--- RawHeader serialization with unsafe pointers ---");
 
     let header = RawHeader {
@@ -24,45 +22,35 @@ fn main() {
         tag: 2,
     };
 
-    // Safe manual version
     let mut safe_bytes = Vec::new();
     safe_bytes.extend_from_slice(&header.total_len.to_le_bytes());
     safe_bytes.extend_from_slice(&header.checksum.to_le_bytes());
     safe_bytes.push(header.tag);
     println!("Safe header bytes:   {:?}", safe_bytes);
 
-    // Unsafe pointer version
     let mut unsafe_buf = Vec::new();
     unsafe {
         serialize_unsafe(&mut unsafe_buf, &header);
     }
     println!("Unsafe header bytes: {:?}", unsafe_buf);
 
-    // Unsafe deserialization back into a struct
-    let parsed = unsafe {
-        deserialize_unsafe(&unsafe_buf)
-            .unwrap() // unwrap Result
-            .expect("no header") // unwrap Option
-    };
+    let parsed = unsafe { deserialize_unsafe(&unsafe_buf).unwrap() };
 
-    // Copy packed fields to properly-aligned locals
-    let total_len = parsed.total_len;
-    let checksum = parsed.checksum;
-    let tag = parsed.tag;
+    let out_total_len = parsed.total_len;
+    let out_checksum = parsed.checksum;
+    let out_tag = parsed.tag;
 
     println!(
         "Deserialized RawHeader -> total_len={}, checksum=0x{:X}, tag={}",
-        total_len, checksum, tag
+        out_total_len, out_checksum, out_tag
     );
 
-    // --- Part 3: Demonstrate checksum verification
     println!("\n--- Checksum verification demo ---");
 
     let mut buf = Vec::new();
     let offset = serialize_value(&mut buf, &Value::from("ChecksumDemo"));
     println!("Serialized one value ({} bytes total)", buf.len() - offset);
 
-    // Corrupt the serialized payload
     if buf.len() > offset + RAW_HEADER_SIZE + 1 {
         buf[offset + RAW_HEADER_SIZE + 1] ^= 0xFF;
     }
@@ -70,15 +58,8 @@ fn main() {
     println!("Attempting to deserialize corrupted data...");
 
     match deserialize_borrowed(&buf[offset..]) {
-        Ok(Some((_v, _))) => {
-            println!("Decoded value unexpectedly (checksum passed)");
-        }
-        Ok(None) => {
-            println!("Not enough data to decode");
-        }
-        Err(e) => {
-            println!("Checksum mismatch detected as error: {}", e);
-        }
+        Ok((v, _)) => println!("Decoded value unexpectedly: {:?}", v),
+        Err(e) => println!("Checksum mismatch detected: {}", e),
     }
 
     println!("\nExample 3 complete.");

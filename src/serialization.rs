@@ -87,15 +87,18 @@ pub unsafe fn serialize_unsafe(buf: &mut Vec<u8>, header: &RawHeader) -> usize {
 /// SAFETY:
 /// The caller must ensure that `src` points to at least `RAW_HEADER_SIZE` readable bytes.
 /// This function reads a `RawHeader` directly from the slice without alignment checks.
-pub unsafe fn deserialize_unsafe(src: &[u8]) -> anyhow::Result<Option<RawHeader>> {
+pub unsafe fn deserialize_unsafe(src: &[u8]) -> anyhow::Result<RawHeader> {
     unsafe {
         if src.len() < RAW_HEADER_SIZE {
-            return Ok(None);
+            return Err(anyhow!(
+                "incomplete header: have {} bytes, need {}",
+                src.len(),
+                RAW_HEADER_SIZE
+            ));
         }
-        // SAFETY: src has at least RAW_HEADER_SIZE readable bytes
+        // SAFETY: caller promises src points to at least RAW_HEADER_SIZE bytes
         let header = read_header_unchecked(src.as_ptr());
-
-        Ok(Some(header))
+        Ok(header)
     }
 }
 
@@ -154,28 +157,29 @@ pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
 }
 
 /// Returns (BorrowedValue, full_entry_size_including_header)
-/// todo: better error handling (Result type instead of option (LAB6)?
-pub fn deserialize_borrowed<'a>(
-    src: &'a [u8],
-) -> anyhow::Result<Option<(BorrowedValue<'a>, usize)>> {
+pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> anyhow::Result<(BorrowedValue<'a>, usize)> {
     // Need header first
     if src.len() < RAW_HEADER_SIZE {
-        return Ok(None);
+        return Err(anyhow!(
+            "incomplete entry header: have {} bytes, need {}",
+            src.len(),
+            RAW_HEADER_SIZE
+        ));
     }
 
     // SAFETY: `src` is validated to be at least `RAW_HEADER_SIZE` bytes above,
     // so deserializing a `RawHeader` from it is safe.
-    let header_opt = unsafe { deserialize_unsafe(src)? };
-    let header = match header_opt {
-        Some(h) => h,
-        None => return Ok(None),
-    };
+    let header = unsafe { deserialize_unsafe(src)? };
 
     let body_len = header.total_len as usize;
     let full_size = RAW_HEADER_SIZE + body_len;
 
     if src.len() < full_size {
-        return Ok(None); // incomplete entry
+        return Err(anyhow!(
+            "incomplete entry body: header says {} bytes, but buffer has {}",
+            body_len,
+            src.len().saturating_sub(RAW_HEADER_SIZE),
+        ));
     }
 
     let body = &src[RAW_HEADER_SIZE..full_size];
@@ -189,32 +193,42 @@ pub fn deserialize_borrowed<'a>(
     match header.tag {
         TAG_INT => {
             if body.len() < 8 {
-                return Ok(None);
+                return Err(anyhow!(
+                    "truncated int payload: need 8 bytes, have {}",
+                    body.len()
+                ));
             }
             let i = read_i64_le(&body[..8]);
-            Ok(Some((BorrowedValue::Int(i), full_size)))
+            Ok((BorrowedValue::Int(i), full_size))
         }
         TAG_BOOL => {
             if body.is_empty() {
-                return Ok(None);
+                return Err(anyhow!("truncated bool payload: need 1 byte, have 0"));
             }
-            Ok(Some((BorrowedValue::Bool(body[0] != 0), full_size)))
+            Ok((BorrowedValue::Bool(body[0] != 0), full_size))
         }
         TAG_TEXT | TAG_BLOB => {
             if body.len() < 8 {
-                return Ok(None);
+                return Err(anyhow!(
+                    "truncated length prefix: need 8 bytes, have {}",
+                    body.len()
+                ));
             }
             let n = read_u64_le(&body[..8]) as usize;
             if body.len() < 8 + n {
-                return Ok(None);
+                return Err(anyhow!(
+                    "truncated payload: length prefix says {} bytes, but body has {}",
+                    n,
+                    body.len().saturating_sub(8),
+                ));
             }
             let bytes = &body[8..8 + n];
             if header.tag == TAG_TEXT {
                 let s = std::str::from_utf8(bytes)
                     .map_err(|e| anyhow!("invalid utf-8 in text value: {e}"))?;
-                Ok(Some((BorrowedValue::Text(s), full_size)))
+                Ok((BorrowedValue::Text(s), full_size))
             } else {
-                Ok(Some((BorrowedValue::Blob(bytes), full_size)))
+                Ok((BorrowedValue::Blob(bytes), full_size))
             }
         }
         _ => Err(anyhow!("unknown tag {}", header.tag)),

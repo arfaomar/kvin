@@ -36,15 +36,11 @@ fn main() -> Result<()> {
     println!("\nAttempting to decode corrupted data...");
 
     match kvin::deserialize_borrowed(&buf[off..]) {
-        Ok(Some((val, _))) => {
-            println!("Unexpectedly succeeded: {:?}", val);
-        }
-        Ok(None) => {
-            println!("Not enough data available to decode.");
+        Ok((val, _len)) => {
+            println!("Decoded value: {:?}", val);
         }
         Err(e) => {
-            println!("Deserialization failed with anyhow error:");
-            println!("  -> {}", e);
+            println!("Error decoding value: {}", e);
         }
     }
 

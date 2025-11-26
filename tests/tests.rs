@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use kvin::{BorrowedValue, Key, KvStore, Kvin, Value, deserialize_borrowed, serialize_value};
+    use kvin::{
+        BorrowedValue, Key, KvStore, Kvin, RAW_HEADER_SIZE, Value, deserialize_borrowed,
+        serialize_value,
+    };
 
     #[test]
     fn test_put_and_get() {
@@ -11,20 +14,23 @@ mod tests {
         // Attempt to overwrite existing key should fail
         assert!(!store.put(Key::from("language"), Value::from("Go")));
 
-        // get() now returns BorrowedValue (borrowed access)
-        assert_eq!(store.get("language"), Some(BorrowedValue::Text("Rust")));
-        assert_eq!(store.get(1), Some(BorrowedValue::Bool(true)));
+        // get() now returns Result<Option<_>>
+        assert_eq!(
+            store.get("language").unwrap(),
+            Some(BorrowedValue::Text("Rust"))
+        );
+        assert_eq!(store.get(1).unwrap(), Some(BorrowedValue::Bool(true)));
 
         // get_owned() explicitly clones into Value
         assert_eq!(
-            store.get_owned("language"),
+            store.get_owned("language").unwrap(),
             Some(Value::Text("Rust".into()))
         );
-        assert_eq!(store.get_owned(1), Some(Value::Bool(true)));
+        assert_eq!(store.get_owned(1).unwrap(), Some(Value::Bool(true)));
 
-        // get_borrowed() directly (same as get)
+        // get_borrowed()
         assert_eq!(
-            store.get_borrowed(&Key::from("language")),
+            store.get_borrowed(&Key::from("language")).unwrap(),
             Some(BorrowedValue::Text("Rust"))
         );
     }
@@ -35,9 +41,14 @@ mod tests {
         assert!(store.put(Key::from(42), Value::from("life")));
         assert!(store.update(&Key::from(42), Value::from("universe")));
 
-        // Both get() and get_owned() must see the new value
-        assert_eq!(store.get(42), Some(BorrowedValue::Text("universe")));
-        assert_eq!(store.get_owned(42), Some(Value::Text("universe".into())));
+        assert_eq!(
+            store.get(42).unwrap(),
+            Some(BorrowedValue::Text("universe"))
+        );
+        assert_eq!(
+            store.get_owned(42).unwrap(),
+            Some(Value::Text("universe".into()))
+        );
     }
 
     #[test]
@@ -51,11 +62,10 @@ mod tests {
         let mut store = Kvin::new();
         assert!(store.put(Key::from("remove"), Value::from(123)));
 
-        assert_eq!(store.delete("remove"), Some(Value::Int(123)));
+        assert_eq!(store.delete("remove").unwrap(), Some(Value::Int(123)));
 
-        // Should now be gone in both get() and get_owned()
-        assert_eq!(store.get("remove"), None);
-        assert_eq!(store.get_owned("remove"), None);
+        assert_eq!(store.get("remove").unwrap(), None);
+        assert_eq!(store.get_owned("remove").unwrap(), None);
     }
 
     #[test]
@@ -64,9 +74,7 @@ mod tests {
         let original = Value::from("Hello Kvin!");
         let off = serialize_value(&mut buf, &original);
 
-        let (borrowed, _len) = deserialize_borrowed(&buf[off..])
-            .expect("deserialize failed") // unwrap Result
-            .expect("no value decoded"); // unwrap Option
+        let (borrowed, _len) = deserialize_borrowed(&buf[off..]).expect("deserialize failed");
         let decoded = borrowed.to_owned();
 
         assert_eq!(decoded, original);
@@ -75,24 +83,11 @@ mod tests {
     #[test]
     fn test_checksum_detection() {
         let mut buf = Vec::new();
-        let off = kvin::serialize_value(&mut buf, &kvin::Value::from("hello"));
+        let off = serialize_value(&mut buf, &Value::from("hello"));
 
-        buf[off + kvin::RAW_HEADER_SIZE + 1] ^= 0xFF; // corrupt
+        buf[off + RAW_HEADER_SIZE + 1] ^= 0xFF;
 
-        let err = kvin::deserialize_borrowed(&buf[off..]).unwrap_err(); // Result Err
-
-        assert!(err.to_string().contains("checksum mismatch"));
-    }
-
-    #[test]
-    fn test_checksum_mismatch_error() {
-        let mut buf = Vec::new();
-        let off = kvin::serialize_value(&mut buf, &kvin::Value::from("hello"));
-
-        buf[off + kvin::RAW_HEADER_SIZE + 1] ^= 0xFF; // corrupt
-
-        let err = kvin::deserialize_borrowed(&buf[off..]).unwrap_err();
-
+        let err = deserialize_borrowed(&buf[off..]).unwrap_err();
         assert!(err.to_string().contains("checksum mismatch"));
     }
 
@@ -112,14 +107,9 @@ mod tests {
         }
 
         assert_eq!(buf.len(), RAW_HEADER_SIZE);
-        let out = unsafe {
-            deserialize_unsafe(&buf)
-                .unwrap() // unwrap Result
-                .expect("no header decoded") // unwrap Option
-        };
+        let out = unsafe { deserialize_unsafe(&buf).expect("deserialize failed") };
 
-        // Copy packed fields safely into locals
-
+        // Copy packed fields to avoid unaligned references
         let h_total_len = h.total_len;
         let h_checksum = h.checksum;
         let h_tag = h.tag;
@@ -136,12 +126,11 @@ mod tests {
     #[test]
     fn test_iter_keys_values() {
         let mut s = Kvin::new();
-        assert!(s.put(Key::from("a"), Value::from(1)));
-        assert!(s.put(Key::from("b"), Value::from(true)));
-        assert!(s.put(Key::from(3), Value::from("x")));
+        s.put(Key::from("a"), Value::from(1));
+        s.put(Key::from("b"), Value::from(true));
+        s.put(Key::from(3), Value::from("x"));
 
-        // Collect keys (display strings, order-insensitive)
-        let mut ks: Vec<String> = s.keys().map(|k| format!("{:?}", k)).collect();
+        let mut ks: Vec<String> = s.keys().map(|k| format!("{:?}", k.unwrap())).collect();
         ks.sort();
         assert_eq!(
             ks,
@@ -152,8 +141,7 @@ mod tests {
             ]
         );
 
-        // Collect values (borrowed)
-        let mut vs: Vec<String> = s.values().map(|v| format!("{:?}", v)).collect();
+        let mut vs: Vec<String> = s.values().map(|v| format!("{:?}", v.unwrap())).collect();
         vs.sort();
         assert_eq!(
             vs,
@@ -164,11 +152,14 @@ mod tests {
             ]
         );
 
-        // Check entries via iter()
         let mut entries: Vec<(String, String)> = s
             .iter()
-            .map(|e| (format!("{:?}", e.key), format!("{:?}", e.value)))
+            .map(|e| {
+                let e = e.unwrap();
+                (format!("{:?}", e.key), format!("{:?}", e.value))
+            })
             .collect();
+
         entries.sort();
         assert_eq!(entries.len(), 3);
     }
@@ -181,10 +172,12 @@ mod tests {
 
         let got: Vec<String> = s
             .iter()
-            .map(|e| format!("{:?}:{:?}", e.key, e.value))
+            .map(|res| {
+                let e = res.unwrap();
+                format!("{:?}:{:?}", e.key, e.value)
+            })
             .collect();
 
-        // Don't assume order; just assert both are present
         assert!(
             got.iter()
                 .any(|l| l.contains("Int(2)") && l.contains("Text(\"x\")"))
@@ -197,33 +190,35 @@ mod tests {
 
     #[test]
     fn keys_and_values_iter() {
-        use kvin::{Key, KvStore, Kvin, Value};
-
         let mut store = Kvin::new();
         store.put(Key::from("lang"), Value::from("Rust"));
         store.put(Key::from("ver"), Value::from(2025_i64));
         store.put(Key::from("safe"), Value::from(true));
 
-        // Collect keys and values to Vecs
-        let mut keys: Vec<String> = store.keys().map(|k| format!("{:?}", k)).collect();
+        let mut keys: Vec<String> = store.keys().map(|k| format!("{:?}", k.unwrap())).collect();
         keys.sort();
 
-        let mut values: Vec<String> = store.values().map(|v| format!("{:?}", v)).collect();
+        let mut values: Vec<String> = store
+            .values()
+            .map(|v| format!("{:?}", v.unwrap()))
+            .collect();
         values.sort();
 
-        // Expected contents — order does not matter
-        let expected_keys = vec![
-            r#"Text("lang")"#.to_string(),
-            r#"Text("safe")"#.to_string(),
-            r#"Text("ver")"#.to_string(),
-        ];
-        let expected_values = vec![
-            r#"Bool(true)"#.to_string(),
-            r#"Int(2025)"#.to_string(),
-            r#"Text("Rust")"#.to_string(),
-        ];
-
-        assert_eq!(keys, expected_keys);
-        assert_eq!(values, expected_values);
+        assert_eq!(
+            keys,
+            vec![
+                r#"Text("lang")"#.to_string(),
+                r#"Text("safe")"#.to_string(),
+                r#"Text("ver")"#.to_string(),
+            ]
+        );
+        assert_eq!(
+            values,
+            vec![
+                r#"Bool(true)"#.to_string(),
+                r#"Int(2025)"#.to_string(),
+                r#"Text("Rust")"#.to_string(),
+            ]
+        );
     }
 }
