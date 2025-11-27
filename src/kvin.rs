@@ -1,6 +1,8 @@
-use crate::{deserialize_borrowed, error::KvinError, error::Result, serialize_value};
+use crate::{KvinError, Result, deserialize_borrowed, serialize_key, serialize_value};
 use std::borrow::ToOwned;
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
 /// Represents possible key types.
 /// Must implement Eq + Hash for use in HashMap.
@@ -44,6 +46,16 @@ impl<'a> BorrowedValue<'a> {
             BorrowedValue::Blob(b) => Value::Blob((*b).to_owned()),
         }
     }
+}
+
+fn write_u64_le(dst: &mut Vec<u8>, v: u64) {
+    dst.extend_from_slice(&v.to_le_bytes());
+}
+
+fn read_u64_le(src: &[u8]) -> u64 {
+    let mut a = [0u8; 8];
+    a.copy_from_slice(&src[..8]);
+    u64::from_le_bytes(a)
 }
 
 #[derive(Debug)]
@@ -139,6 +151,87 @@ impl Kvin {
 
     pub fn values<'a>(&'a self) -> impl Iterator<Item = Result<BorrowedValue<'a>>> + 'a {
         self.iter().map(|res| res.map(|e| e.value))
+    }
+
+    /// Persist the current store to `dir/kvin.values` and `dir/kvin.index`.
+    pub fn save_to_dir<P: AsRef<Path>>(&self, dir: P) -> Result<()> {
+        let dir = dir.as_ref();
+        fs::create_dir_all(dir)?; // may create it if it doesn't exist
+
+        let values_path = dir.join("kvin.values");
+        let index_path = dir.join("kvin.index");
+
+        // 1) Write the raw value buffer
+        fs::write(&values_path, &self.buf)?;
+
+        // 2) Serialize the index: [count: u64][entries...]
+        let mut idx_buf = Vec::new();
+
+        write_u64_le(&mut idx_buf, self.index.len() as u64);
+        for (key, &off) in &self.index {
+            // serialize key
+            serialize_key(&mut idx_buf, key);
+            // serialize offset as u64
+            write_u64_le(&mut idx_buf, off as u64);
+        }
+
+        fs::write(&index_path, &idx_buf)?;
+
+        Ok(())
+    }
+
+    /// Load a Kvin store from `dir/kvin.values` and `dir/kvin.index`.
+    ///
+    /// If the files do not exist, returns an empty store.
+    pub fn load_from_dir<P: AsRef<Path>>(dir: P) -> Result<Self> {
+        let dir = dir.as_ref();
+        let values_path = dir.join("kvin.values");
+        let index_path = dir.join("kvin.index");
+
+        // First-run case: no persistence yet -> empty store
+        if !values_path.exists() || !index_path.exists() {
+            return Ok(Kvin::new());
+        }
+
+        // 1) Read value buffer
+        let buf = fs::read(&values_path)?; // KvinError::Io on failure
+
+        // 2) Read and parse the index
+        let idx_bytes = fs::read(&index_path)?;
+        if idx_bytes.len() < 8 {
+            return Err(KvinError::MalformedEntry);
+        }
+
+        let mut pos = 0;
+        let count = read_u64_le(&idx_bytes[pos..pos + 8]) as usize;
+        pos += 8;
+
+        let mut index = HashMap::with_capacity(count);
+
+        for _ in 0..count {
+            // deserialize key
+            let (key, consumed) = crate::deserialize_key(&idx_bytes[pos..])?;
+            pos += consumed;
+
+            // read offset
+            if idx_bytes.len() < pos + 8 {
+                return Err(KvinError::IncompleteBody);
+            }
+            let off = read_u64_le(&idx_bytes[pos..pos + 8]) as usize;
+            pos += 8;
+
+            // basic structural check: offset must be inside buf
+            if off >= buf.len() {
+                return Err(KvinError::CorruptedIndex);
+            }
+
+            // optional: try to parse the value to catch checksum errors early
+            let _ = crate::deserialize_borrowed(&buf[off..])?;
+
+            index.insert(key, off);
+        }
+
+        Ok(Kvin { buf, index })
     }
 }
 

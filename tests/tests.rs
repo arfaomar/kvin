@@ -4,6 +4,8 @@ mod tests {
         BorrowedValue, Key, KvStore, Kvin, KvinError, RAW_HEADER_SIZE, Value, deserialize_borrowed,
         serialize_value,
     };
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_put_and_get() {
@@ -241,5 +243,134 @@ mod tests {
                 r#"Text("Rust")"#.to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn test_persistence_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // initial store
+        let mut s = Kvin::new();
+        s.put(Key::from("a"), Value::from(1)).unwrap();
+        s.put(Key::from("b"), Value::from(true)).unwrap();
+        s.put(Key::from(3), Value::from("hello")).unwrap();
+
+        s.save_to_dir(path).unwrap();
+
+        // load a fresh store from disk
+        let s2 = Kvin::load_from_dir(path).unwrap();
+
+        // correctness of get / get_owned
+        assert_eq!(s2.get("a").unwrap(), Some(BorrowedValue::Int(1)));
+        assert_eq!(s2.get("b").unwrap(), Some(BorrowedValue::Bool(true)));
+        assert_eq!(s2.get(3).unwrap(), Some(BorrowedValue::Text("hello")));
+
+        assert_eq!(s2.get_owned("a").unwrap(), Some(Value::Int(1)));
+        assert_eq!(s2.get_owned("b").unwrap(), Some(Value::Bool(true)));
+        assert_eq!(s2.get_owned(3).unwrap(), Some(Value::Text("hello".into())));
+
+        // correctness of keys() and values()
+        let mut ks: Vec<String> = s2.keys().map(|k| format!("{:?}", k.unwrap())).collect();
+        ks.sort();
+        assert_eq!(
+            ks,
+            vec![
+                "Int(3)".to_string(),
+                "Text(\"a\")".to_string(),
+                "Text(\"b\")".to_string()
+            ]
+        );
+
+        let mut vs: Vec<String> = s2.values().map(|v| format!("{:?}", v.unwrap())).collect();
+        vs.sort();
+        assert_eq!(
+            vs,
+            vec![
+                "Bool(true)".to_string(),
+                "Int(1)".to_string(),
+                "Text(\"hello\")".to_string()
+            ]
+        );
+
+        // correctness of iter()
+        let entries: Vec<_> = s2
+            .iter()
+            .map(|e| {
+                let e = e.unwrap();
+                (format!("{:?}", e.key), format!("{:?}", e.value))
+            })
+            .collect();
+        assert_eq!(entries.len(), 3);
+    }
+
+    #[test]
+    fn test_load_missing_files_returns_empty() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // no files inside => must return empty Kvin, not error
+        let s = Kvin::load_from_dir(path).unwrap();
+
+        assert_eq!(s.get("x").unwrap(), None);
+        assert_eq!(s.keys().count(), 0);
+        assert_eq!(s.values().count(), 0);
+    }
+
+    #[test]
+    fn test_corrupted_values_file_checksum_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // Create a valid store and save
+        let mut s = Kvin::new();
+        s.put(Key::from("k"), Value::from("hello")).unwrap();
+        s.save_to_dir(path).unwrap();
+
+        // Corrupt the values file by flipping a byte in the body portion
+        let values_path = path.join("kvin.values");
+        let mut bytes = fs::read(&values_path).unwrap();
+        // flip any byte ≥ header size + 1
+        if bytes.len() > RAW_HEADER_SIZE + 1 {
+            bytes[RAW_HEADER_SIZE + 1] ^= 0xFF;
+        }
+        fs::write(&values_path, &bytes).unwrap();
+
+        // Loading must detect corruption either immediately (preferred)
+        // or as soon as a value is parsed.
+        let err = Kvin::load_from_dir(path).unwrap_err();
+
+        match err {
+            KvinError::ChecksumMismatch
+            | KvinError::MalformedEntry
+            | KvinError::IncompleteBody
+            | KvinError::CorruptedIndex => { /* acceptable */ }
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_corrupted_index_file_fails_to_load() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // Create valid store and save
+        let mut s = Kvin::new();
+        s.put(Key::from("a"), Value::from(1)).unwrap();
+        s.save_to_dir(path).unwrap();
+
+        // Corrupt the index file by truncating it
+        let index_path = path.join("kvin.index");
+        let idx = fs::read(&index_path).unwrap();
+        let truncated = &idx[..idx.len() / 2]; // half the bytes
+        fs::write(&index_path, truncated).unwrap();
+
+        let err = Kvin::load_from_dir(path).unwrap_err();
+
+        match err {
+            KvinError::MalformedEntry | KvinError::IncompleteBody | KvinError::CorruptedIndex => { /* acceptable */
+            }
+            other => panic!("unexpected error: {:?}", other),
+        }
     }
 }
