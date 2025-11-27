@@ -102,7 +102,7 @@ pub trait KvStore {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Kvin {
     /// Append-only bytes (our “log”).
-    pub buf: Vec<u8>, // TODO: FOR SHOWCASE - make private later
+    buf: Vec<u8>,
     /// Maps a key to the start offset of its most recent serialized value in `buf`.
     index: HashMap<Key, usize>,
 }
