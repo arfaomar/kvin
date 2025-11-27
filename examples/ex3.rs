@@ -1,75 +1,66 @@
 use kvin::{
-    Key, KvStore, Kvin, RAW_HEADER_SIZE, RawHeader, Value, deserialize_borrowed,
+    Key, KvStore, Kvin, RAW_HEADER_SIZE, RawHeader, Result, Value, deserialize_borrowed,
     deserialize_unsafe, serialize_unsafe, serialize_value,
 };
 
-fn main() {
-    println!("=== Example 3: Unsafe Serialization & Checksum Demo ===\n");
+fn main() -> Result<()> {
+    println!("=== Example 3: Unsafe header demo + checksum ===");
 
-    // --- Part 1: Normal store usage (safe)
+    // Part 1: Normal usage
     let mut store = Kvin::new();
-    store.put(Key::from("language"), Value::from("Rust"));
-    store.put(Key::from(1), Value::from(true));
+    store.put(Key::from("safe"), Value::from(true))?;
+    store.put(Key::from("msg"), Value::from("Hello"))?;
 
-    println!("Stored values:");
-    println!("  get(language)  -> {:?}", store.get("language"));
-    println!("  get_owned(1)   -> {:?}", store.get_owned(1));
+    println!("safe -> {:?}", store.get("safe")?);
 
-    // --- Part 2: Demonstrate unsafe RawHeader serialization
-    println!("\n--- RawHeader serialization with unsafe pointers ---");
-
+    // Part 2: RawHeader unsafe roundtrip
     let header = RawHeader {
         total_len: 42,
         checksum: 0xDEADBEEF,
         tag: 2,
     };
 
-    // Safe manual version
-    let mut safe_bytes = Vec::new();
-    safe_bytes.extend_from_slice(&header.total_len.to_le_bytes());
-    safe_bytes.extend_from_slice(&header.checksum.to_le_bytes());
-    safe_bytes.push(header.tag);
-    println!("Safe header bytes:   {:?}", safe_bytes);
-
-    // Unsafe pointer version
-    let mut unsafe_buf = Vec::new();
+    let mut buf = Vec::new();
     unsafe {
-        serialize_unsafe(&mut unsafe_buf, &header);
+        serialize_unsafe(&mut buf, &header);
     }
-    println!("Unsafe header bytes: {:?}", unsafe_buf);
 
-    // Unsafe deserialization back into a struct
-    let parsed = unsafe { deserialize_unsafe(&unsafe_buf) }.unwrap();
+    println!("Serialized RawHeader bytes: {:?}", buf);
 
-    // Copy the packed fields into locals to avoid unaligned references
-    let total_len = parsed.total_len;
-    let checksum = parsed.checksum;
-    let tag = parsed.tag;
+    let parsed = unsafe { deserialize_unsafe(&buf)? };
+
+    // Copy packed fields BEFORE printing
+    let h_len = header.total_len;
+    let h_crc = header.checksum;
+    let h_tag = header.tag;
+
+    let p_len = parsed.total_len;
+    let p_crc = parsed.checksum;
+    let p_tag = parsed.tag;
 
     println!(
-        "Deserialized RawHeader -> total_len={}, checksum=0x{:X}, tag={}",
-        total_len, checksum, tag
+        "Roundtrip RawHeader: len={}, crc=0x{:X}, tag={}",
+        p_len, p_crc, p_tag
     );
 
-    // --- Part 3: Demonstrate checksum verification
-    println!("\n--- Checksum verification demo ---");
+    assert_eq!(h_len, p_len);
+    assert_eq!(h_crc, p_crc);
+    assert_eq!(h_tag, p_tag);
 
+    // Part 3: Checksum detection
     let mut buf = Vec::new();
-    let offset = serialize_value(&mut buf, &Value::from("ChecksumDemo"));
-    println!("Serialized one value ({} bytes total)", buf.len() - offset);
+    let off = serialize_value(&mut buf, &Value::from("Checksum"));
 
-    // Corrupt the serialized payload to trigger checksum failure
-    if buf.len() > offset + RAW_HEADER_SIZE + 1 {
-        buf[offset + RAW_HEADER_SIZE + 1] ^= 0xFF;
+    // Corrupt 1 byte
+    buf[off + RAW_HEADER_SIZE + 1] ^= 0xFF;
+
+    println!("Attempting to decode corrupted entry...");
+
+    match deserialize_borrowed(&buf[off..]) {
+        Ok((_, _)) => println!("ERROR: checksum passed unexpectedly"),
+        Err(e) => println!("Checksum error caught: {}", e),
     }
 
-    println!("Attempting to deserialize corrupted data...");
-    let result = std::panic::catch_unwind(|| deserialize_borrowed(&buf[offset..]));
-    match result {
-        Ok(Some((_v, _))) => println!("Decoded value unexpectedly (checksum passed)"),
-        Ok(None) => println!("Checksum verification failed (None returned)"),
-        Err(_) => println!("Checksum mismatch caused panic as expected"),
-    }
-
-    println!("\nExample 3 complete.");
+    println!("Example 3 complete.\n");
+    Ok(())
 }
