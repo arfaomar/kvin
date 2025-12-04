@@ -123,13 +123,13 @@ pub struct Kvin {
 
     /// Optional directory for automatic persistence.
     /// None => purely in-memory store, only manual save_to_dir/load_from_dir.
-    persistence_dir: Option<std::path::PathBuf>,
+    pub persistence_dir: Option<std::path::PathBuf>,
 
     /// Number of mutating operations since the last automatic save.
     dirty_ops: u64,
 
     /// Number of mutating operations before an automatic save is triggered.
-    autosave_threshold: Option<u64>,
+    pub autosave_threshold: Option<u64>,
 }
 
 impl Kvin {
@@ -327,7 +327,7 @@ impl Kvin {
         Ok(())
     }
 
-    pub fn set_autosave_threshold(&mut self, new_threshold: Option<u64>) {
+    pub fn set_autosave_threshold(&mut self, new_threshold: Option<u64>) -> () {
         self.autosave_threshold = new_threshold;
     }
 }

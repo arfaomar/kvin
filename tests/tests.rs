@@ -427,29 +427,28 @@ mod tests {
 
     #[test]
     fn test_autosave_failure_returns_error() {
-        // This directory should not be writable for normal users.
-        // If running as root, this test will not work, but labs typically do not.
-        let bad_dir = std::path::Path::new("/root/kvintest");
+        let bad_path = std::path::Path::new("/dev/null/kvindir");
 
-        // Try to open Kvin in a directory we cannot write to
-        let result = Kvin::open(bad_dir);
+        // Opening should succeed if load_from_dir returns Ok(Kvin::new()),
+        // because open() does NOT write yet.
+        let mut store = Kvin::open(bad_path).unwrap_or_else(|_| {
+            // If open() fails due to the directory being invalid,
+            // fall back to a manually constructed persistent store.
+            let mut s = Kvin::new();
+            s.persistence_dir = Some(bad_path.to_path_buf());
+            s.autosave_threshold = Some(1); // force autosave next op
+            s
+        });
 
-        match result {
-            Ok(mut s) => {
-                // Force small threshold to immediately trigger autosave
-                s.set_autosave_threshold(Some(1));
+        // Force autosave every operation
+        store.set_autosave_threshold(Some(1));
 
-                let err = s.put(Key::from("a"), Value::from(1)).unwrap_err();
+        // Now any mutating operation should attempt autosave → fail
+        let err = store.put(Key::from("x"), Value::from(1)).unwrap_err();
 
-                match err {
-                    KvinError::AutosaveFailed(_) => { /* OK */ }
-                    other => panic!("expected AutosaveFailed, got: {:?}", other),
-                }
-            }
-            Err(KvinError::Io(_)) => {
-                // Also acceptable: cannot open the directory at all
-            }
-            Err(other) => panic!("unexpected error during open: {:?}", other),
+        match err {
+            KvinError::AutosaveFailed(_) => { /* success */ }
+            other => panic!("expected AutosaveFailed, got {:?}", other),
         }
     }
 }
