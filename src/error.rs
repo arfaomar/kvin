@@ -31,6 +31,9 @@ pub enum KvinError {
 
     #[error("Corrupted on-disk index")]
     CorruptedIndex,
+
+    #[error("Autosave failed: {0}")]
+    AutosaveFailed(String),
 }
 
 // A specialized Result type for Kvin operations.

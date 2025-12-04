@@ -373,4 +373,83 @@ mod tests {
             other => panic!("unexpected error: {:?}", other),
         }
     }
+
+    #[test]
+    fn test_autosave_triggers_at_threshold() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // Open persistent store (autosave enabled)
+        let mut store = Kvin::open(path).unwrap();
+
+        // Lower threshold so autosave triggers quickly
+        store.set_autosave_threshold(Some(2));
+
+        // 1st mutation
+        store.put(Key::from("a"), Value::from(1)).unwrap();
+        // 2nd mutation triggers autosave
+        store.put(Key::from("b"), Value::from(2)).unwrap();
+
+        // Both files must exist because autosave triggered
+        let values_path = path.join("kvin.values");
+        let index_path = path.join("kvin.index");
+
+        assert!(values_path.exists(), "autosave did not write values file");
+        assert!(index_path.exists(), "autosave did not write index file");
+
+        // Load fresh store and verify correctness
+        let s2 = Kvin::load_from_dir(path).unwrap();
+        assert_eq!(s2.get("a").unwrap(), Some(BorrowedValue::Int(1)));
+        assert_eq!(s2.get("b").unwrap(), Some(BorrowedValue::Int(2)));
+    }
+
+    #[test]
+    fn test_autosave_persists_updates_and_deletes() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        let mut store = Kvin::open(path).unwrap();
+        store.set_autosave_threshold(Some(2));
+
+        store.put(Key::from("k"), Value::from("old")).unwrap();
+        store.update(&Key::from("k"), Value::from("new")).unwrap(); // triggers autosave
+
+        let s2 = Kvin::load_from_dir(path).unwrap();
+        assert_eq!(s2.get("k").unwrap(), Some(BorrowedValue::Text("new")));
+
+        store.delete("k").unwrap(); // 1
+        store.put(Key::from("x"), Value::from(9)).unwrap(); // 2 → autosave
+
+        let s3 = Kvin::load_from_dir(path).unwrap();
+        assert_eq!(s3.get("k").unwrap(), None);
+        assert_eq!(s3.get("x").unwrap(), Some(BorrowedValue::Int(9)));
+    }
+
+    #[test]
+    fn test_autosave_failure_returns_error() {
+        // This directory should not be writable for normal users.
+        // If running as root, this test will not work, but labs typically do not.
+        let bad_dir = std::path::Path::new("/root/kvintest");
+
+        // Try to open Kvin in a directory we cannot write to
+        let result = Kvin::open(bad_dir);
+
+        match result {
+            Ok(mut s) => {
+                // Force small threshold to immediately trigger autosave
+                s.set_autosave_threshold(Some(1));
+
+                let err = s.put(Key::from("a"), Value::from(1)).unwrap_err();
+
+                match err {
+                    KvinError::AutosaveFailed(_) => { /* OK */ }
+                    other => panic!("expected AutosaveFailed, got: {:?}", other),
+                }
+            }
+            Err(KvinError::Io(_)) => {
+                // Also acceptable: cannot open the directory at all
+            }
+            Err(other) => panic!("unexpected error during open: {:?}", other),
+        }
+    }
 }
