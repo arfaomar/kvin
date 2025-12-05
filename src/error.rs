@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-#[derive(Error, Debug, Clone, PartialEq)]
+#[derive(Error, Debug)]
 pub enum KvinError {
     #[error("Key already exists")]
     KeyExists,
@@ -25,6 +25,15 @@ pub enum KvinError {
 
     #[error("Malformed or corrupted entry")]
     MalformedEntry,
+
+    #[error("I/O error while accessing persistence files: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Corrupted on-disk index")]
+    CorruptedIndex,
+
+    #[error("Autosave failed: {0}")]
+    AutosaveFailed(String),
 }
 
 // A specialized Result type for Kvin operations.

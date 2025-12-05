@@ -4,6 +4,8 @@ mod tests {
         BorrowedValue, Key, KvStore, Kvin, KvinError, RAW_HEADER_SIZE, Value, deserialize_borrowed,
         serialize_value,
     };
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_put_and_get() {
@@ -241,5 +243,212 @@ mod tests {
                 r#"Text("Rust")"#.to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn test_persistence_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // initial store
+        let mut s = Kvin::new();
+        s.put(Key::from("a"), Value::from(1)).unwrap();
+        s.put(Key::from("b"), Value::from(true)).unwrap();
+        s.put(Key::from(3), Value::from("hello")).unwrap();
+
+        s.save_to_dir(path).unwrap();
+
+        // load a fresh store from disk
+        let s2 = Kvin::load_from_dir(path).unwrap();
+
+        // correctness of get / get_owned
+        assert_eq!(s2.get("a").unwrap(), Some(BorrowedValue::Int(1)));
+        assert_eq!(s2.get("b").unwrap(), Some(BorrowedValue::Bool(true)));
+        assert_eq!(s2.get(3).unwrap(), Some(BorrowedValue::Text("hello")));
+
+        assert_eq!(s2.get_owned("a").unwrap(), Some(Value::Int(1)));
+        assert_eq!(s2.get_owned("b").unwrap(), Some(Value::Bool(true)));
+        assert_eq!(s2.get_owned(3).unwrap(), Some(Value::Text("hello".into())));
+
+        // correctness of keys() and values()
+        let mut ks: Vec<String> = s2.keys().map(|k| format!("{:?}", k.unwrap())).collect();
+        ks.sort();
+        assert_eq!(
+            ks,
+            vec![
+                "Int(3)".to_string(),
+                "Text(\"a\")".to_string(),
+                "Text(\"b\")".to_string()
+            ]
+        );
+
+        let mut vs: Vec<String> = s2.values().map(|v| format!("{:?}", v.unwrap())).collect();
+        vs.sort();
+        assert_eq!(
+            vs,
+            vec![
+                "Bool(true)".to_string(),
+                "Int(1)".to_string(),
+                "Text(\"hello\")".to_string()
+            ]
+        );
+
+        // correctness of iter()
+        let entries: Vec<_> = s2
+            .iter()
+            .map(|e| {
+                let e = e.unwrap();
+                (format!("{:?}", e.key), format!("{:?}", e.value))
+            })
+            .collect();
+        assert_eq!(entries.len(), 3);
+    }
+
+    #[test]
+    fn test_load_missing_files_returns_empty() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // no files inside => must return empty Kvin, not error
+        let s = Kvin::load_from_dir(path).unwrap();
+
+        assert_eq!(s.get("x").unwrap(), None);
+        assert_eq!(s.keys().count(), 0);
+        assert_eq!(s.values().count(), 0);
+    }
+
+    #[test]
+    fn test_corrupted_values_file_checksum_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // Create a valid store and save
+        let mut s = Kvin::new();
+        s.put(Key::from("k"), Value::from("hello")).unwrap();
+        s.save_to_dir(path).unwrap();
+
+        // Corrupt the values file by flipping a byte in the body portion
+        let values_path = path.join("kvin.values");
+        let mut bytes = fs::read(&values_path).unwrap();
+        // flip any byte ≥ header size + 1
+        if bytes.len() > RAW_HEADER_SIZE + 1 {
+            bytes[RAW_HEADER_SIZE + 1] ^= 0xFF;
+        }
+        fs::write(&values_path, &bytes).unwrap();
+
+        // Loading must detect corruption either immediately (preferred)
+        // or as soon as a value is parsed.
+        let err = Kvin::load_from_dir(path).unwrap_err();
+
+        match err {
+            KvinError::ChecksumMismatch
+            | KvinError::MalformedEntry
+            | KvinError::IncompleteBody
+            | KvinError::CorruptedIndex => { /* acceptable */ }
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_corrupted_index_file_fails_to_load() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // Create valid store and save
+        let mut s = Kvin::new();
+        s.put(Key::from("a"), Value::from(1)).unwrap();
+        s.save_to_dir(path).unwrap();
+
+        // Corrupt the index file by truncating it
+        let index_path = path.join("kvin.index");
+        let idx = fs::read(&index_path).unwrap();
+        let truncated = &idx[..idx.len() / 2]; // half the bytes
+        fs::write(&index_path, truncated).unwrap();
+
+        let err = Kvin::load_from_dir(path).unwrap_err();
+
+        match err {
+            KvinError::MalformedEntry | KvinError::IncompleteBody | KvinError::CorruptedIndex => { /* acceptable */
+            }
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_autosave_triggers_at_threshold() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // Open persistent store (autosave enabled)
+        let mut store = Kvin::open(path).unwrap();
+
+        // Lower threshold so autosave triggers quickly
+        store.set_autosave_threshold(Some(2));
+
+        // 1st mutation
+        store.put(Key::from("a"), Value::from(1)).unwrap();
+        // 2nd mutation triggers autosave
+        store.put(Key::from("b"), Value::from(2)).unwrap();
+
+        // Both files must exist because autosave triggered
+        let values_path = path.join("kvin.values");
+        let index_path = path.join("kvin.index");
+
+        assert!(values_path.exists(), "autosave did not write values file");
+        assert!(index_path.exists(), "autosave did not write index file");
+
+        // Load fresh store and verify correctness
+        let s2 = Kvin::load_from_dir(path).unwrap();
+        assert_eq!(s2.get("a").unwrap(), Some(BorrowedValue::Int(1)));
+        assert_eq!(s2.get("b").unwrap(), Some(BorrowedValue::Int(2)));
+    }
+
+    #[test]
+    fn test_autosave_persists_updates_and_deletes() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        let mut store = Kvin::open(path).unwrap();
+        store.set_autosave_threshold(Some(2));
+
+        store.put(Key::from("k"), Value::from("old")).unwrap();
+        store.update(&Key::from("k"), Value::from("new")).unwrap(); // triggers autosave
+
+        let s2 = Kvin::load_from_dir(path).unwrap();
+        assert_eq!(s2.get("k").unwrap(), Some(BorrowedValue::Text("new")));
+
+        store.delete("k").unwrap(); // 1
+        store.put(Key::from("x"), Value::from(9)).unwrap(); // 2 → autosave
+
+        let s3 = Kvin::load_from_dir(path).unwrap();
+        assert_eq!(s3.get("k").unwrap(), None);
+        assert_eq!(s3.get("x").unwrap(), Some(BorrowedValue::Int(9)));
+    }
+
+    #[test]
+    fn test_autosave_failure_returns_error() {
+        let bad_path = std::path::Path::new("/dev/null/kvindir");
+
+        // Opening should succeed if load_from_dir returns Ok(Kvin::new()),
+        // because open() does NOT write yet.
+        let mut store = Kvin::open(bad_path).unwrap_or_else(|_| {
+            // If open() fails due to the directory being invalid,
+            // fall back to a manually constructed persistent store.
+            let mut s = Kvin::new();
+            s.persistence_dir = Some(bad_path.to_path_buf());
+            s.autosave_threshold = Some(1); // force autosave next op
+            s
+        });
+
+        // Force autosave every operation
+        store.set_autosave_threshold(Some(1));
+
+        // Now any mutating operation should attempt autosave → fail
+        let err = store.put(Key::from("x"), Value::from(1)).unwrap_err();
+
+        match err {
+            KvinError::AutosaveFailed(_) => { /* success */ }
+            other => panic!("expected AutosaveFailed, got {:?}", other),
+        }
     }
 }
