@@ -1,6 +1,10 @@
-use crate::{deserialize_borrowed, error::KvinError, error::Result, serialize_value};
+use crate::{
+    KvinError, Result, deserialize_borrowed, deserialize_key, serialize_key, serialize_value,
+};
 use std::borrow::ToOwned;
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
 /// Represents possible key types.
 /// Must implement Eq + Hash for use in HashMap.
@@ -44,6 +48,16 @@ impl<'a> BorrowedValue<'a> {
             BorrowedValue::Blob(b) => Value::Blob((*b).to_owned()),
         }
     }
+}
+
+fn write_u64_le(dst: &mut Vec<u8>, v: u64) {
+    dst.extend_from_slice(&v.to_le_bytes());
+}
+
+fn read_u64_le(src: &[u8]) -> u64 {
+    let mut a = [0u8; 8];
+    a.copy_from_slice(&src[..8]);
+    u64::from_le_bytes(a)
 }
 
 #[derive(Debug)]
@@ -102,9 +116,20 @@ pub trait KvStore {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Kvin {
     /// Append-only bytes (our “log”).
-    pub buf: Vec<u8>, // TODO: FOR SHOWCASE - make private later
+    buf: Vec<u8>,
+
     /// Maps a key to the start offset of its most recent serialized value in `buf`.
     index: HashMap<Key, usize>,
+
+    /// Optional directory for automatic persistence.
+    /// None => purely in-memory store, only manual save_to_dir/load_from_dir.
+    pub persistence_dir: Option<std::path::PathBuf>,
+
+    /// Number of mutating operations since the last automatic save.
+    dirty_ops: u64,
+
+    /// Number of mutating operations before an automatic save is triggered.
+    pub autosave_threshold: Option<u64>,
 }
 
 impl Kvin {
@@ -113,6 +138,9 @@ impl Kvin {
         Self {
             buf: Vec::new(),
             index: HashMap::new(),
+            persistence_dir: None,
+            dirty_ops: 0,
+            autosave_threshold: None, // in-memory
         }
     }
     /// zero-copy borrowed get method.
@@ -140,6 +168,168 @@ impl Kvin {
     pub fn values<'a>(&'a self) -> impl Iterator<Item = Result<BorrowedValue<'a>>> + 'a {
         self.iter().map(|res| res.map(|e| e.value))
     }
+
+    /// Persist the current store to `dir/kvin.values` and `dir/kvin.index`.
+    pub fn save_to_dir<P: AsRef<Path>>(&self, dir: P) -> Result<()> {
+        use std::fs::File;
+        use std::io::Write;
+
+        let dir = dir.as_ref();
+        fs::create_dir_all(dir)?; // may create it if it doesn't exist
+
+        let values_path = dir.join("kvin.values");
+        let index_path = dir.join("kvin.index");
+
+        let values_tmp = dir.join("kvin.values.tmp");
+        let index_tmp = dir.join("kvin.index.tmp");
+
+        // 1) Write the raw value buffer to a temp file
+        {
+            let mut f = File::create(&values_tmp)?;
+            f.write_all(&self.buf)?;
+            f.sync_all()?; // flush to disk
+        }
+
+        // 2) Serialize the index into a buffer and write to temp
+        let mut idx_buf = Vec::new();
+        write_u64_le(&mut idx_buf, self.index.len() as u64);
+        for (key, &off) in &self.index {
+            serialize_key(&mut idx_buf, key);
+            write_u64_le(&mut idx_buf, off as u64);
+        }
+
+        {
+            let mut f = File::create(&index_tmp)?;
+            f.write_all(&idx_buf)?;
+            f.sync_all()?;
+        }
+
+        // 3) Atomically replace the main files with the temp files
+        fs::rename(&values_tmp, &values_path)?;
+        fs::rename(&index_tmp, &index_path)?;
+
+        Ok(())
+    }
+
+    /// Load a Kvin store from `dir/kvin.values` and `dir/kvin.index`.
+    /// If the files do not exist, returns an empty store.
+    pub fn load_from_dir<P: AsRef<Path>>(dir: P) -> Result<Self> {
+        let dir = dir.as_ref();
+        let values_path = dir.join("kvin.values");
+        let index_path = dir.join("kvin.index");
+
+        let values_tmp = dir.join("kvin.values.tmp");
+        let index_tmp = dir.join("kvin.index.tmp");
+
+        let main_exists = values_path.exists() && index_path.exists();
+        let tmp_exists = values_tmp.exists() && index_tmp.exists();
+
+        // Helper closure: load from arbitrary value + index paths
+        fn load_from_paths(values: &Path, index: &Path) -> Result<Kvin> {
+            let buf = fs::read(values)?;
+
+            let idx_bytes = fs::read(index)?;
+            if idx_bytes.len() < 8 {
+                return Err(KvinError::MalformedEntry);
+            }
+
+            let mut pos = 0;
+            let count = read_u64_le(&idx_bytes[pos..pos + 8]) as usize;
+            pos += 8;
+
+            let mut index = HashMap::with_capacity(count);
+
+            for _ in 0..count {
+                let (key, consumed) = deserialize_key(&idx_bytes[pos..])?;
+                pos += consumed;
+
+                if idx_bytes.len() < pos + 8 {
+                    return Err(KvinError::IncompleteBody);
+                }
+                let off = read_u64_le(&idx_bytes[pos..pos + 8]) as usize;
+                pos += 8;
+
+                if off >= buf.len() {
+                    return Err(KvinError::CorruptedIndex);
+                }
+
+                let _ = deserialize_borrowed(&buf[off..])?;
+
+                index.insert(key, off);
+            }
+
+            Ok(Kvin {
+                buf,
+                index,
+                persistence_dir: None,
+                dirty_ops: 0,
+                autosave_threshold: None,
+            })
+        }
+
+        if main_exists {
+            // Normal case: just load the main files
+            return load_from_paths(&values_path, &index_path);
+        }
+
+        if tmp_exists {
+            // Recovery case: try to recover from temp files
+            let store = load_from_paths(&values_tmp, &index_tmp)?;
+
+            // If that worked, promote .tmp to main (best-effort)
+            let _ = fs::rename(&values_tmp, &values_path);
+            let _ = fs::rename(&index_tmp, &index_path);
+
+            return Ok(store);
+        }
+
+        // First run: nothing there yet
+        Ok(Kvin::new())
+    }
+
+    /// Open a persistent Kvin store rooted at `dir` that remembers the directory for automatic persistence and Drop.
+    pub fn open<P: AsRef<Path>>(dir: P) -> Result<Self> {
+        let dir_ref = dir.as_ref();
+        let mut store = Kvin::load_from_dir(dir_ref)?;
+        store.persistence_dir = Some(dir.as_ref().to_path_buf());
+        store.dirty_ops = 0;
+        store.autosave_threshold = Some(10);
+
+        Ok(store)
+    }
+
+    fn mark_dirty(&mut self) -> Result<()> {
+        // Only autosave if persistent storage is active
+        let threshold = match (self.persistence_dir.as_ref(), self.autosave_threshold) {
+            (Some(_), Some(n)) => n,
+            _ => return Ok(()), // no autosave
+        };
+
+        self.dirty_ops += 1;
+
+        if self.dirty_ops >= threshold {
+            if let Some(dir) = &self.persistence_dir {
+                match self.save_to_dir(dir) {
+                    Ok(_) => {
+                        self.dirty_ops = 0; // successful autosave
+                    }
+                    Err(e) => {
+                        return Err(KvinError::AutosaveFailed(format!(
+                            "Could not autosave to {}: {}",
+                            dir.display(),
+                            e
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn set_autosave_threshold(&mut self, new_threshold: Option<u64>) -> () {
+        self.autosave_threshold = new_threshold;
+    }
 }
 
 impl KvStore for Kvin {
@@ -149,6 +339,7 @@ impl KvStore for Kvin {
         }
         let off = serialize_value(&mut self.buf, &value);
         self.index.insert(key, off);
+        self.mark_dirty()?;
         Ok(())
     }
 
@@ -158,6 +349,7 @@ impl KvStore for Kvin {
         }
         let off = serialize_value(&mut self.buf, &new_value);
         self.index.insert(key.clone(), off);
+        self.mark_dirty()?;
         Ok(())
     }
 
@@ -179,7 +371,9 @@ impl KvStore for Kvin {
         };
 
         let (bv, _) = deserialize_borrowed(&self.buf[off..])?;
-        Ok(Some(bv.to_owned()))
+        let result = Some(bv.to_owned());
+        self.mark_dirty()?;
+        Ok(result)
     }
 
     fn get_owned<K>(&self, key: K) -> Result<Option<Value>>
@@ -189,6 +383,16 @@ impl KvStore for Kvin {
         match self.get_borrowed(&key.into())? {
             None => Ok(None),
             Some(bv) => Ok(Some(bv.to_owned())),
+        }
+    }
+}
+
+impl Drop for Kvin {
+    fn drop(&mut self) {
+        if let (Some(dir), Some(_threshold)) = (&self.persistence_dir, self.autosave_threshold) {
+            if self.dirty_ops > 0 {
+                let _ = self.save_to_dir(dir);
+            }
         }
     }
 }

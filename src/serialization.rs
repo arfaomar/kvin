@@ -1,4 +1,4 @@
-use crate::{BorrowedValue, Value, error::KvinError, error::Result};
+use crate::{BorrowedValue, Key, KvinError, Result, Value};
 use crc::{CRC_32_ISO_HDLC, Crc};
 
 #[repr(C, packed)]
@@ -152,7 +152,6 @@ pub fn serialize_value(buf: &mut Vec<u8>, value: &Value) -> usize {
 }
 
 /// Returns (BorrowedValue, full_entry_size_including_header)
-/// todo: better error handling (Result type instead of option (LAB6)?
 pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Result<(BorrowedValue<'a>, usize)> {
     // Need header first
     if src.len() < RAW_HEADER_SIZE {
@@ -209,6 +208,65 @@ pub fn deserialize_borrowed<'a>(src: &'a [u8]) -> Result<(BorrowedValue<'a>, usi
             }
         }
         _ => Err(KvinError::UnknownTag(header.tag)),
+    }
+}
+
+/// Serialize a Key into `buf` (no header, just a small tag + payload format).
+pub fn serialize_key(buf: &mut Vec<u8>, key: &Key) {
+    match key {
+        Key::Int(i) => {
+            buf.push(TAG_INT);
+            write_i64_le(buf, *i);
+        }
+        Key::Text(s) => {
+            buf.push(TAG_TEXT);
+            let bytes = s.as_bytes();
+            write_u64_le(buf, bytes.len() as u64);
+            buf.extend_from_slice(bytes);
+        }
+        Key::Bool(b) => {
+            buf.push(TAG_BOOL);
+            buf.push(if *b { 1 } else { 0 });
+        }
+    }
+}
+
+/// Deserialize a Key from `src`, returning (key, bytes_consumed).
+pub fn deserialize_key(src: &[u8]) -> Result<(Key, usize)> {
+    if src.is_empty() {
+        return Err(KvinError::MalformedEntry);
+    }
+
+    let tag = src[0];
+    let body = &src[1..];
+
+    match tag {
+        TAG_INT => {
+            if body.len() < 8 {
+                return Err(KvinError::MalformedEntry);
+            }
+            let i = read_i64_le(&body[..8]);
+            Ok((Key::Int(i), 1 + 8))
+        }
+        TAG_BOOL => {
+            if body.is_empty() {
+                return Err(KvinError::MalformedEntry);
+            }
+            Ok((Key::Bool(body[0] != 0), 1 + 1))
+        }
+        TAG_TEXT => {
+            if body.len() < 8 {
+                return Err(KvinError::MalformedEntry);
+            }
+            let n = read_u64_le(&body[..8]) as usize;
+            if body.len() < 8 + n {
+                return Err(KvinError::IncompleteBody);
+            }
+            let bytes = &body[8..8 + n];
+            let s = std::str::from_utf8(bytes).map_err(|_| KvinError::InvalidUtf8)?;
+            Ok((Key::Text(s.to_owned()), 1 + 8 + n))
+        }
+        _ => Err(KvinError::UnknownTag(tag)),
     }
 }
 
