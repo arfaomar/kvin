@@ -110,13 +110,14 @@ pub trait KvStore {
     fn get_owned<K>(&self, key: K) -> Result<Option<Value>>
     where
         K: Into<Key>;
+    fn compact(&mut self) -> Result<()>;
 }
 
 /// The actual store implementation.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Kvin {
     /// Append-only bytes (our “log”).
-    buf: Vec<u8>,
+    pub buf: Vec<u8>,
 
     /// Maps a key to the start offset of its most recent serialized value in `buf`.
     index: HashMap<Key, usize>,
@@ -130,6 +131,9 @@ pub struct Kvin {
 
     /// Number of mutating operations before an automatic save is triggered.
     pub autosave_threshold: Option<u64>,
+
+    /// Ratio of live entries to total buffer size that triggers automatic compaction after an autosave.
+    pub compaction_ratio: Option<u64>,
 }
 
 impl Kvin {
@@ -141,6 +145,7 @@ impl Kvin {
             persistence_dir: None,
             dirty_ops: 0,
             autosave_threshold: None, // in-memory
+            compaction_ratio: None,   // no automatic compaction
         }
     }
     /// zero-copy borrowed get method.
@@ -264,6 +269,7 @@ impl Kvin {
                 persistence_dir: None,
                 dirty_ops: 0,
                 autosave_threshold: None,
+                compaction_ratio: None,
             })
         }
 
@@ -294,6 +300,7 @@ impl Kvin {
         store.persistence_dir = Some(dir.as_ref().to_path_buf());
         store.dirty_ops = 0;
         store.autosave_threshold = Some(10);
+        store.compaction_ratio = Some(8);
 
         Ok(store)
     }
@@ -302,7 +309,7 @@ impl Kvin {
         // Only autosave if persistent storage is active
         let threshold = match (self.persistence_dir.as_ref(), self.autosave_threshold) {
             (Some(_), Some(n)) => n,
-            _ => return Ok(()), // no autosave
+            _ => return Ok(()),
         };
 
         self.dirty_ops += 1;
@@ -311,7 +318,16 @@ impl Kvin {
             if let Some(dir) = &self.persistence_dir {
                 match self.save_to_dir(dir) {
                     Ok(_) => {
-                        self.dirty_ops = 0; // successful autosave
+                        if let Some(ratio) = self.compaction_ratio {
+                            let live = self.index.len();
+                            let threshold = live.saturating_mul(ratio as usize);
+
+                            if self.buf.len() > threshold {
+                                self.do_compact()?;
+                            }
+                        }
+
+                        self.dirty_ops = 0;
                     }
                     Err(e) => {
                         return Err(KvinError::AutosaveFailed(format!(
@@ -329,6 +345,26 @@ impl Kvin {
 
     pub fn set_autosave_threshold(&mut self, new_threshold: Option<u64>) -> () {
         self.autosave_threshold = new_threshold;
+    }
+
+    pub fn set_compaction_ratio(&mut self, ratio: Option<u64>) {
+        self.compaction_ratio = ratio;
+    }
+
+    fn do_compact(&mut self) -> Result<()> {
+        let mut new_buf = Vec::new();
+        let mut new_index = HashMap::new();
+
+        for (key, &old_off) in &self.index {
+            let (bv, _) = deserialize_borrowed(&self.buf[old_off..])?;
+            let new_off = serialize_value(&mut new_buf, &bv.to_owned());
+            new_index.insert(key.clone(), new_off);
+        }
+
+        self.buf = new_buf;
+        self.index = new_index;
+
+        Ok(())
     }
 }
 
@@ -384,6 +420,10 @@ impl KvStore for Kvin {
             None => Ok(None),
             Some(bv) => Ok(Some(bv.to_owned())),
         }
+    }
+
+    fn compact(&mut self) -> Result<()> {
+        self.do_compact()
     }
 }
 

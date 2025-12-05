@@ -451,4 +451,119 @@ mod tests {
             other => panic!("expected AutosaveFailed, got {:?}", other),
         }
     }
+
+    #[test]
+    fn test_manual_compaction() {
+        let mut s = Kvin::new();
+
+        // Create lots of overwrite garbage
+        s.put(Key::from("k"), Value::from("v1")).unwrap();
+        s.update(&Key::from("k"), Value::from("v2")).unwrap();
+        s.update(&Key::from("k"), Value::from("v3")).unwrap();
+
+        let before = s.buf.len();
+        assert!(before > 0);
+
+        // Manual compaction must shrink the buffer
+        s.compact().unwrap();
+        let after = s.buf.len();
+
+        assert!(after < before);
+        assert_eq!(s.get("k").unwrap(), Some(BorrowedValue::Text("v3")));
+    }
+
+    #[test]
+    fn test_auto_compaction_triggers() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        let mut s = Kvin::open(path).unwrap();
+        s.set_autosave_threshold(Some(1));
+        s.set_compaction_ratio(Some(1));
+
+        // Write large garbage entries to inflate the buffer
+        s.put(Key::from("k"), Value::from("short")).unwrap();
+
+        // Add a much bigger value
+        s.update(&Key::from("k"), Value::from("this is a much longer string"))
+            .unwrap();
+
+        // Add another long one (creates more garbage)
+        s.update(
+            &Key::from("k"),
+            Value::from("even longer string than before!!!!"),
+        )
+        .unwrap();
+
+        // Record the inflated size
+        let inflated_size = s.buf.len();
+
+        // Trigger autosave + compaction
+        s.update(&Key::from("k"), Value::from("final")).unwrap();
+
+        let compacted_size = s.buf.len();
+
+        assert!(
+            compacted_size < inflated_size,
+            "compacted size {}, inflated size {}",
+            compacted_size,
+            inflated_size
+        );
+
+        // verify correctness
+        assert_eq!(s.get("k").unwrap(), Some(BorrowedValue::Text("final")));
+    }
+
+    #[test]
+    fn test_auto_compaction_no_trigger_with_large_ratio() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        let mut s = Kvin::open(path).unwrap();
+        s.set_autosave_threshold(Some(1));
+        s.set_compaction_ratio(Some(10_000)); // impossible to reach
+
+        s.put(Key::from("k"), Value::from("v1")).unwrap();
+        let before = s.buf.len();
+
+        s.update(&Key::from("k"), Value::from("v2")).unwrap();
+        let after = s.buf.len();
+
+        // No compaction should have occurred
+        assert!(after > before);
+    }
+
+    #[test]
+    fn test_compaction_preserves_data() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        let mut s = Kvin::open(path).unwrap();
+        s.set_autosave_threshold(Some(1));
+        s.set_compaction_ratio(Some(1)); // compact aggressively
+
+        s.put(Key::from(1), Value::from("A")).unwrap();
+        s.update(&1.into(), Value::from("B")).unwrap();
+        s.update(&1.into(), Value::from("C")).unwrap();
+
+        let s2 = Kvin::load_from_dir(path).unwrap();
+        assert_eq!(s2.get(1).unwrap(), Some(BorrowedValue::Text("C")));
+    }
+
+    #[test]
+    fn test_compaction_after_delete() {
+        let mut s = Kvin::new();
+
+        s.put(Key::from("a"), Value::from(1)).unwrap();
+        s.put(Key::from("b"), Value::from(2)).unwrap();
+        s.delete("a").unwrap();
+
+        let before = s.buf.len();
+        s.compact().unwrap();
+        let after = s.buf.len();
+
+        assert!(after < before); // removed stale A-entry
+        assert_eq!(s.get("b").unwrap(), Some(BorrowedValue::Int(2)));
+        assert_eq!(s.get("a").unwrap(), None);
+    }
 }
