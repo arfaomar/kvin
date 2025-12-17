@@ -30,7 +30,7 @@ The recommended commands are:
   file1-path \
   file2-path \
   > lab8_stresstest/stresstest_output.txt 2>&1
-````
+```
 
 ### Linux
 
