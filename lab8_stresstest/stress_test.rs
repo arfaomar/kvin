@@ -1,6 +1,10 @@
 //! Usage:
-//!   cargo run --release --example ex7_stress_pageviews <file1> <file2>
-//! Files MUST be plain text (decompressed beforehand).
+//!   cargo run --release --bin lab8_stresstest <file1> <file2>
+//!
+//! Notes:
+//! - Input files must be plain-text pagecounts-ez files
+//! - Files must be decompressed beforehand
+
 
 use kvin::{BorrowedValue, Key, KvStore, Kvin, Result, Value};
 
@@ -93,7 +97,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
         eprintln!("Usage:");
-        eprintln!("  cargo run --release --example ex7_stress_pageviews <file1> <file2>");
+        eprintln!("  cargo run --release --bin lab8_stresstest <file1> <file2>");
         return Ok(());
     }
 
@@ -159,7 +163,7 @@ fn main() -> Result<()> {
 
     let throughput = total_rows as f64 / total_time.as_secs_f64();
     println!("Throughput:              {:.2} rows/sec", throughput);
-    
+
 
     println!("\nStress test complete.");
     println!("Temporary directory cleaned up automatically.");

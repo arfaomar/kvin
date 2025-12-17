@@ -22,18 +22,39 @@ All of these values are printed at the end of the run.
 **On macOS**, additional timing and memory information is collected using the system
 tool `/usr/bin/time -l`.
 
-The recommended command is:
+The recommended commands are:
 
-```bash
-/usr/bin/time -l cargo run --release --example ex7_stress_pageviews \
+### macOS
+```zsh
+/usr/bin/time -l cargo run --release --bin lab8_stresstest \
   file1-path \
   file2-path \
-  > stresstest_output.txt 2>&1
+  > lab8_stresstest/stresstest_output.txt 2>&1
 ````
 
-This captures both the program output and the system timing statistics in a
-single file.
+### Linux
 
+```bash
+/usr/bin/time -v cargo run --release --bin lab8_stresstest \
+  file1-path \
+  file2-path \
+  > lab8_stresstest/stresstest_output.txt 2>&1
+```
+
+### Windows (PowerShell)
+
+```powershell
+Measure-Command {
+  cargo run --release --bin lab8_stresstest `
+    file1-path `
+    file2-path
+} | Out-File -Append lab8_stresstest\stresstest_output.txt
+```
+
+These commands capture both the program output and the system-level timing
+information in a single file.
+
+ 
 
 ## Autosave and Compaction Settings
 
@@ -49,18 +70,17 @@ used during the stress test.
 Both values can be changed easily to experiment with different settings without
 modifying the rest of the code.
 
----
 
 ## Processing Logic
 
-- Input files are read line by line using `BufReader`.
-- Each line is parsed into a domain code, page name, and view count.
-- Keys are constructed as `"<domain>/<page>"`.
+* Input files are read line by line using `BufReader`.
+* Each line is parsed into a domain code, page name, and view count.
+* Keys are constructed as `"<domain>/<page>"`.
 
 The files are processed in order:
 
-- The first file inserts new entries into the store.
-- The second file updates existing entries by accumulating view counts or inserts
+* The first file inserts new entries into the store.
+* The second file updates existing entries by accumulating view counts or inserts
   new ones if a key was not present.
 
 All operations go through the `KvStore` trait.
