@@ -19,8 +19,10 @@ During execution, it tracks:
 
 All of these values are printed at the end of the run.
 
-**On macOS**, additional timing and memory information is collected using the system
+- **On macOS**, additional timing and memory information is collected using the system
 tool `/usr/bin/time -l`.
+- **On Linux**, the equivalent command is `/usr/bin/time -v`.
+- **On Windows**, PowerShell's `Measure-Command` is used to capture execution time.
 
 The recommended commands are:
 
