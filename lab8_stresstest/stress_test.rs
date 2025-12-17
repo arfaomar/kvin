@@ -5,7 +5,6 @@
 //! - Input files must be plain-text pagecounts-ez files
 //! - Files must be decompressed beforehand
 
-
 use kvin::{BorrowedValue, Key, KvStore, Kvin, Result, Value};
 
 use std::env;
@@ -163,7 +162,6 @@ fn main() -> Result<()> {
 
     let throughput = total_rows as f64 / total_time.as_secs_f64();
     println!("Throughput:              {:.2} rows/sec", throughput);
-
 
     println!("\nStress test complete.");
     println!("Temporary directory cleaned up automatically.");
