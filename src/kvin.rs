@@ -120,7 +120,7 @@ pub struct Kvin {
     pub buf: Vec<u8>,
 
     /// Maps a key to the start offset of its most recent serialized value in `buf`.
-    index: HashMap<Key, usize>,
+    pub index: HashMap<Key, usize>,
 
     /// Optional directory for automatic persistence.
     /// None => purely in-memory store, only manual save_to_dir/load_from_dir.
@@ -483,5 +483,11 @@ impl From<i32> for Key {
 impl From<i32> for Value {
     fn from(i: i32) -> Self {
         Value::Int(i as i64)
+    }
+}
+
+impl From<&Key> for Key {
+    fn from(k: &Key) -> Self {
+        k.clone()
     }
 }

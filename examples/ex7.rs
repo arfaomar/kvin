@@ -61,7 +61,10 @@ fn main() -> Result<()> {
     store.update(&Key::from("msg"), Value::from("this is larger"))?;
     println!("2) update to 'this is larger'");
 
-    store.update(&Key::from("msg"), Value::from("this is a very long message indeed"))?;
+    store.update(
+        &Key::from("msg"),
+        Value::from("this is a very long message indeed"),
+    )?;
     println!("3) update to a very long message -> autosave + maybe compaction");
 
     let buf_after_updates = store.buf.len();
@@ -79,7 +82,11 @@ fn main() -> Result<()> {
     // We expect compaction to reduce space usage.
     println!(
         "Compaction {}reduce buffer size.",
-        if buf_after_compaction < buf_after_updates { "" } else { "did NOT " }
+        if buf_after_compaction < buf_after_updates {
+            ""
+        } else {
+            "did NOT "
+        }
     );
 
     // ----------------------------------------------------------------------
@@ -87,7 +94,7 @@ fn main() -> Result<()> {
     // Even if automatic compaction did not trigger, the user can force one.
     // ----------------------------------------------------------------------
     println!("\n--- Running manual compaction() ---");
-    store.compact()?;  // simply calls do_compact()
+    store.compact()?; // simply calls do_compact()
 
     let buf_after_manual = store.buf.len();
     println!("Buffer length after manual compaction: {buf_after_manual}");
