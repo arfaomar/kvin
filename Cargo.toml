@@ -7,3 +7,7 @@ edition = "2024"
 crc = "3.3.0"
 thiserror = "2.0.17"
 tempfile = "3.23.0"
+
+[[bin]]
+name = "lab8_stresstest"
+path = "src/bin/lab8_stresstest/stress_test.rs"
