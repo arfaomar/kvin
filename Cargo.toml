@@ -10,4 +10,4 @@ tempfile = "3.23.0"
 
 [[bin]]
 name = "lab8_stresstest"
-path = "lab8_stresstest/stress_test.rs"
+path = "src/bin/lab8_stresstest/stress_test.rs"

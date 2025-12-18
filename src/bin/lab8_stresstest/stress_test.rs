@@ -115,7 +115,7 @@ fn main() -> Result<()> {
 
     let mut store = Kvin::open(path)?;
     store.set_autosave_threshold(Some(50_000)); // reduce I/O noise
-    store.set_compaction_ratio(Some(8));
+    store.set_compaction_ratio(Some(2));
 
     println!("Kvin store directory: {}", path.display());
 
