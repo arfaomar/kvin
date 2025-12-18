@@ -1,0 +1,45 @@
+    Finished `release` profile [optimized] target(s) in 0.01s
+     Running `target/release/lab8_stresstest lab8_stresstest/wikipedia/pageviews-20150501-010000 lab8_stresstest/wikipedia/pageviews-20150501-020000`
+=== Lab 8 – Exercise 1.3: Wikipedia Pageviews Stress Test ===
+Input files:
+  1) lab8_stresstest/wikipedia/pageviews-20150501-010000
+  2) lab8_stresstest/wikipedia/pageviews-20150501-020000
+Kvin store directory: /var/folders/6d/vt30srms7xbf9xt7mr98828w0000gn/T/.tmpAP307D
+
+--- Processing file 1 (insert phase) ---
+
+--- Processing file 2 (accumulation phase) ---
+
+=== Results ===
+Total rows processed:     10303502
+Total KV operations:     10303501
+Unique keys stored:      8234464
+Final buffer size:       172938549 bytes
+Total wall-clock time:   401.33s
+
+--- Per-row averages ---
+Avg total time / row:    38950.5 ns
+Avg parse time / row:    111.4 ns
+Avg KV time / row:       38670.5 ns
+Throughput:              25673.62 rows/sec
+
+Stress test complete.
+Temporary directory cleaned up automatically.
+      402.41 real       352.58 user        36.36 sys
+          3072770048  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+            11489682  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+               29383  voluntary context switches
+               81785  involuntary context switches
+       1648039220812  instructions retired
+       1233152127629  cycles elapsed
+          1856168512  peak memory footprint
