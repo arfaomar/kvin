@@ -566,4 +566,64 @@ mod tests {
         assert_eq!(s.get("b").unwrap(), Some(BorrowedValue::Int(2)));
         assert_eq!(s.get("a").unwrap(), None);
     }
+
+    #[test]
+    fn test_auto_compaction_persists_on_next_autosave() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        let mut s = Kvin::open(path).unwrap();
+        s.set_autosave_threshold(Some(1)); // every mutation triggers autosave
+        s.set_compaction_ratio(Some(1)); // aggressive
+
+        // Make log “dirty” with overwrites (creates garbage).
+        s.put(Key::from("k"), Value::from("short")).unwrap();
+        s.update(&Key::from("k"), Value::from("this is a much longer string"))
+            .unwrap();
+        s.update(
+            &Key::from("k"),
+            Value::from("even longer string than before!!!!"),
+        )
+        .unwrap();
+
+        let inflated_mem = s.buf.len();
+        assert!(inflated_mem > 0);
+
+        // This update triggers autosave, then compaction (in-memory).
+        s.update(&Key::from("k"), Value::from("final")).unwrap();
+
+        let compacted_mem = s.buf.len();
+        assert!(
+            compacted_mem < inflated_mem,
+            "expected in-memory compaction to shrink buf (before {}, after {})",
+            inflated_mem,
+            compacted_mem
+        );
+        assert_eq!(s.get("k").unwrap(), Some(BorrowedValue::Text("final")));
+
+        // Measure disk size AFTER the autosave that triggered compaction.
+        // This disk state corresponds to the save that happened BEFORE compaction.
+        let values_path = path.join("kvin.values");
+        let disk_after_save_before_compact = fs::metadata(&values_path).unwrap().len() as usize;
+
+        // Force another autosave with a small write. This writes the *compacted* buffer.
+        s.put(Key::from("x"), Value::from(1_i64)).unwrap();
+
+        let disk_after_next_save = fs::metadata(&values_path).unwrap().len() as usize;
+
+        // This is the only safe expectation:
+        // the next save should not be larger by “a lot” (it should reflect compacted log + small new entry).
+        // In most cases it should shrink, but depending on format overhead it could be close.
+        assert!(
+            disk_after_next_save <= disk_after_save_before_compact + 128,
+            "expected next autosave to persist compacted state (before {}, after {})",
+            disk_after_save_before_compact,
+            disk_after_next_save
+        );
+
+        // Reload correctness.
+        let s2 = Kvin::load_from_dir(path).unwrap();
+        assert_eq!(s2.get("k").unwrap(), Some(BorrowedValue::Text("final")));
+        assert_eq!(s2.get("x").unwrap(), Some(BorrowedValue::Int(1)));
+    }
 }

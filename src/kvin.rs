@@ -209,7 +209,7 @@ impl Kvin {
             f.sync_all()?;
         }
 
-        // 3) Atomically replace the main files with the temp files
+        // 3) Replace the main files with the temp files
         fs::rename(&values_tmp, &values_path)?;
         fs::rename(&index_tmp, &index_path)?;
 
@@ -352,12 +352,16 @@ impl Kvin {
     }
 
     fn do_compact(&mut self) -> Result<()> {
-        let mut new_buf = Vec::new();
-        let mut new_index = HashMap::new();
+        let mut new_buf = Vec::with_capacity(self.buf.len()); // optional heuristic
+        let mut new_index = HashMap::with_capacity(self.index.len());
 
         for (key, &old_off) in &self.index {
-            let (bv, _) = deserialize_borrowed(&self.buf[old_off..])?;
-            let new_off = serialize_value(&mut new_buf, &bv.to_owned());
+            // We only need the serialized entry length; parsing also validates integrity.
+            let (_bv, consumed) = deserialize_borrowed(&self.buf[old_off..])?;
+
+            let new_off = new_buf.len();
+            new_buf.extend_from_slice(&self.buf[old_off..old_off + consumed]);
+
             new_index.insert(key.clone(), new_off);
         }
 
