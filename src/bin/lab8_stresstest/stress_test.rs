@@ -1,6 +1,3 @@
-//! Usage:
-//!   cargo run --release --bin lab8_stresstest <file1> <file2>
-//!
 //! Notes:
 //! - Input files must be plain-text pagecounts-ez files
 //! - Files must be decompressed beforehand
