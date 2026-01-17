@@ -1,9 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use kvin::{
-        BorrowedValue, Key, KvStore, Kvin, KvinError, RAW_HEADER_SIZE, Value, deserialize_borrowed,
-        serialize_value,
+    use crate::{
+        BorrowedValue, Key, KvStore, Kvin, KvinError, RAW_HEADER_SIZE, RawHeader, Value,
+        deserialize_borrowed, deserialize_unsafe, serialize_unsafe, serialize_value,
     };
+
     use std::fs;
     use tempfile::tempdir;
 
@@ -106,8 +107,6 @@ mod tests {
 
     #[test]
     fn test_unsafe_header_roundtrip() {
-        use kvin::{RawHeader, deserialize_unsafe, serialize_unsafe};
-
         let h = RawHeader {
             total_len: 42,
             checksum: 0xABCD1234,

@@ -10,3 +10,5 @@ pub use crate::serialization::{
 };
 
 pub use crate::error::{KvinError, Result};
+#[cfg(test)]
+mod tests;
