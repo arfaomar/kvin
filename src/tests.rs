@@ -426,7 +426,12 @@ mod tests {
 
     #[test]
     fn test_autosave_failure_returns_error() {
+
+        #[cfg(unix)]
         let bad_path = std::path::Path::new("/dev/null/kvindir");
+
+        #[cfg(windows)]
+        let bad_path = std::path::Path::new("NUL\\kvindir");
 
         // Opening should succeed if load_from_dir returns Ok(Kvin::new()),
         // because open() does NOT write yet.
